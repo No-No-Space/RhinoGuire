@@ -1,0 +1,14 @@
+Key,Value,R,G,B,A
+Building Year,1985,100,100,100,255
+Building Year,1990,150,150,150,255
+Building Year,2021,220,220,220,255
+Condition,Bad,255,0,0,255
+Condition,Good,0,200,0,255
+Department,Hospital,0,150,255,255
+Department,Neuro,150,0,255,255
+Latest Renovation,-,80,80,80,255
+Latest Renovation,2005,200,150,100,255
+Latest Renovation,2015,255,200,150,255
+Refurbish or Demolish,Demolish,200,0,0,255
+Refurbish or Demolish,Not necessary,100,200,100,255
+Refurbish or Demolish,Refurbish,255,165,0,255
