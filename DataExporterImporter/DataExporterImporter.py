@@ -41,7 +41,7 @@ class DataExporterImporterGUI(Form):
         Form.__init__(self)
 
         self.Text = "Rhino Data Exporter/Importer"
-        self.Size = Size(500, 350)
+        self.Size = Size(500, 420)
         self.FormBorderStyle = FormBorderStyle.FixedDialog
         self.MaximizeBox = False
         self.MinimizeBox = False
@@ -85,7 +85,7 @@ class DataExporterImporterGUI(Form):
         options_group = GroupBox()
         options_group.Text = "Import Options"
         options_group.Location = Point(20, y_pos)
-        options_group.Size = Size(450, 150)
+        options_group.Size = Size(450, 220)
         self.Controls.Add(options_group)
         
         opt_y = 25
@@ -105,8 +105,25 @@ class DataExporterImporterGUI(Form):
         self.create_keys_check.Location = Point(10, opt_y)
         self.create_keys_check.Size = Size(400, 20)
         self.create_keys_check.Checked = True
+        self.create_keys_check.CheckedChanged += self.on_create_keys_changed
         options_group.Controls.Add(self.create_keys_check)
         opt_y += 25
+
+        # Radio buttons for new key creation scope
+        self.new_keys_all_radio = RadioButton()
+        self.new_keys_all_radio.Text = "Apply to all objects in Excel file"
+        self.new_keys_all_radio.Location = Point(30, opt_y)
+        self.new_keys_all_radio.Size = Size(400, 20)
+        self.new_keys_all_radio.Checked = True
+        options_group.Controls.Add(self.new_keys_all_radio)
+        opt_y += 22
+
+        self.new_keys_selected_radio = RadioButton()
+        self.new_keys_selected_radio.Text = "Apply only to pre-selected objects"
+        self.new_keys_selected_radio.Location = Point(30, opt_y)
+        self.new_keys_selected_radio.Size = Size(400, 20)
+        options_group.Controls.Add(self.new_keys_selected_radio)
+        opt_y += 30
         
         # Update empty cells checkbox
         self.update_empty_check = CheckBox()
@@ -133,6 +150,12 @@ class DataExporterImporterGUI(Form):
         self.placeholder_text.Enabled = False
         options_group.Controls.Add(self.placeholder_text)
         
+    def on_create_keys_changed(self, sender, event):
+        """Enable/disable radio buttons based on create keys checkbox state"""
+        enabled = self.create_keys_check.Checked
+        self.new_keys_all_radio.Enabled = enabled
+        self.new_keys_selected_radio.Enabled = enabled
+
     def on_update_empty_changed(self, sender, event):
         """Enable/disable placeholder controls based on checkbox state"""
         enabled = self.update_empty_check.Checked
@@ -264,7 +287,7 @@ def export_data_to_excel():
 
 
 def import_data_from_excel(create_backup, create_missing_keys,
-                           update_empty, placeholder):
+                           update_empty, placeholder, only_selected):
     """
     Import data from Excel file and update objects based on GUID
 
@@ -273,16 +296,34 @@ def import_data_from_excel(create_backup, create_missing_keys,
         create_missing_keys (bool): Create keys that don't exist on objects
         update_empty (bool): Update values when Excel cell is empty
         placeholder (str): Placeholder value for empty cells (empty string means delete key)
+        only_selected (bool): Only apply new keys to pre-selected objects
     """
+    # Get pre-selected objects if only_selected is True
+    selected_guids = None
+    if only_selected and create_missing_keys:
+        selected_objects = rs.SelectedObjects()
+        if not selected_objects:
+            MessageBox.Show(
+                "No objects are selected.\n\n"
+                "Please select objects first if you want to use\n"
+                "'Apply only to pre-selected objects' option.",
+                "No Selection",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            )
+            return
+        selected_guids = set(str(obj) for obj in selected_objects)
+        print(f"Pre-selected {len(selected_guids)} objects for new key creation.")
+
     # Open file dialog to select Excel file
     dialog = OpenFileDialog()
     dialog.Filter = "Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*"
     dialog.Title = "Select Excel file to import"
-    
+
     if dialog.ShowDialog() != DialogResult.OK:
         print("Import cancelled.")
         return
-    
+
     filepath = dialog.FileName
     print(f"Selected file: {filepath}")
     
@@ -350,6 +391,7 @@ def import_data_from_excel(create_backup, create_missing_keys,
     keys_created = 0
     keys_updated = 0
     keys_deleted = 0
+    skipped_not_selected = 0
     
     for row_idx in range(2, ws.max_row + 1):
         guid_str = ws.cell(row=row_idx, column=1).value
@@ -366,7 +408,16 @@ def import_data_from_excel(create_backup, create_missing_keys,
                 not_found_count += 1
                 not_found_guids.append(guid_str)
                 continue
-            
+
+            # Check if this object can receive new keys
+            can_create_keys = create_missing_keys
+            object_skipped_selection = False
+            if can_create_keys and selected_guids is not None:
+                # Only allow key creation if object is in selected set
+                if guid_str not in selected_guids:
+                    can_create_keys = False
+                    object_skipped_selection = True
+
             # Process each key/value pair
             for col_idx, key in enumerate(keys, start=2):
                 excel_value = ws.cell(row=row_idx, column=col_idx).value
@@ -386,12 +437,16 @@ def import_data_from_excel(create_backup, create_missing_keys,
                     # Empty cell with update_empty enabled
                     if placeholder:
                         # Set to placeholder
+                        if not key_exists and not can_create_keys:
+                            # Skip if key doesn't exist and we can't create it
+                            if object_skipped_selection:
+                                skipped_not_selected += 1
+                            continue
                         rs.SetUserText(obj, key, placeholder)
                         if key_exists:
                             keys_updated += 1
                         else:
-                            if create_missing_keys:
-                                keys_created += 1
+                            keys_created += 1
                     else:
                         # Delete the key
                         if key_exists:
@@ -400,13 +455,15 @@ def import_data_from_excel(create_backup, create_missing_keys,
                 else:
                     # Non-empty value
                     value_str = str(excel_value)
-                    
-                    if not key_exists and not create_missing_keys:
-                        # Skip if key doesn't exist and we're not creating missing keys
+
+                    if not key_exists and not can_create_keys:
+                        # Skip if key doesn't exist and we can't create it
+                        if object_skipped_selection:
+                            skipped_not_selected += 1
                         continue
-                    
+
                     rs.SetUserText(obj, key, value_str)
-                    
+
                     if key_exists:
                         keys_updated += 1
                     else:
@@ -428,7 +485,10 @@ def import_data_from_excel(create_backup, create_missing_keys,
         f"Keys updated: {keys_updated}\n"
         f"Keys deleted: {keys_deleted}\n"
     )
-    
+
+    if skipped_not_selected > 0:
+        summary_msg += f"Keys skipped (not in selection): {skipped_not_selected}\n"
+
     if not_found_count > 0:
         summary_msg += f"\nGUIDs not found: {not_found_count}\n"
         if len(not_found_guids) <= 5:
@@ -481,12 +541,14 @@ def main():
             create_missing_keys = gui.create_keys_check.Checked
             update_empty = gui.update_empty_check.Checked
             placeholder = gui.placeholder_text.Text if update_empty else ""
+            only_selected = gui.new_keys_selected_radio.Checked
 
             import_data_from_excel(
                 create_backup,
                 create_missing_keys,
                 update_empty,
-                placeholder
+                placeholder,
+                only_selected
             )
 
 
