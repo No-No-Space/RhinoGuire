@@ -30,6 +30,9 @@ except ImportError:
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 
+# Import System.Drawing for PNG export
+import System.Drawing as sdrawing
+
 
 # ============================================================================
 # SCRIPT 01 FUNCTIONS - Read keys from Excel and apply to objects
@@ -94,11 +97,35 @@ def collect_unique_values(objects):
 
 
 def write_color_map_excel(excel_path, key_value_dict):
-    """Write color mapping Excel file
+    """Write color mapping Excel file, preserving existing color values.
+
+    If the target file already exists, existing RGB/A values are preserved
+    for key-value pairs that still exist. Only entries no longer present
+    in the scan are removed.
 
     Format:
     Columns: Key | Value | R | G | B | A
     """
+    # Read existing color values if the file already exists
+    existing_colors = {}
+    if os.path.exists(excel_path):
+        try:
+            old_wb = load_workbook(excel_path)
+            old_ws = old_wb.active
+            for row in old_ws.iter_rows(min_row=2, values_only=True):
+                if row and len(row) >= 6 and row[0] and row[1]:
+                    old_key = str(row[0]).strip()
+                    old_value = str(row[1]).strip()
+                    old_r = row[2] if row[2] is not None else ''
+                    old_g = row[3] if row[3] is not None else ''
+                    old_b = row[4] if row[4] is not None else ''
+                    old_a = row[5] if row[5] is not None else ''
+                    existing_colors[(old_key, old_value)] = (old_r, old_g, old_b, old_a)
+            old_wb.close()
+            print(f"Found {len(existing_colors)} existing color definitions to preserve.")
+        except Exception as e:
+            print(f"Could not read existing file, creating new: {e}")
+
     try:
         wb = Workbook()
         ws = wb.active
@@ -111,16 +138,28 @@ def write_color_map_excel(excel_path, key_value_dict):
             cell.font = ExcelFont(bold=True)
             cell.fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
 
-        # Write data rows
+        # Write data rows, preserving existing colors
         row_idx = 2
+        preserved = 0
         for key_name in sorted(key_value_dict.keys()):
             for value in key_value_dict[key_name]:
                 ws.cell(row=row_idx, column=1, value=key_name)
                 ws.cell(row=row_idx, column=2, value=value)
-                ws.cell(row=row_idx, column=3, value='')  # R
-                ws.cell(row=row_idx, column=4, value='')  # G
-                ws.cell(row=row_idx, column=5, value='')  # B
-                ws.cell(row=row_idx, column=6, value='')  # A
+
+                # Check if color values exist for this key-value pair
+                old_rgba = existing_colors.get((key_name, value))
+                if old_rgba:
+                    ws.cell(row=row_idx, column=3, value=old_rgba[0])
+                    ws.cell(row=row_idx, column=4, value=old_rgba[1])
+                    ws.cell(row=row_idx, column=5, value=old_rgba[2])
+                    ws.cell(row=row_idx, column=6, value=old_rgba[3])
+                    preserved += 1
+                else:
+                    ws.cell(row=row_idx, column=3, value='')
+                    ws.cell(row=row_idx, column=4, value='')
+                    ws.cell(row=row_idx, column=5, value='')
+                    ws.cell(row=row_idx, column=6, value='')
+
                 row_idx += 1
 
         # Auto-adjust column widths
@@ -138,7 +177,11 @@ def write_color_map_excel(excel_path, key_value_dict):
 
         wb.save(excel_path)
         wb.close()
-        return row_idx - 2  # Return number of data rows
+
+        total_rows = row_idx - 2
+        if preserved > 0:
+            print(f"Preserved {preserved} existing color definitions out of {total_rows} entries.")
+        return total_rows
     except Exception as e:
         print(f"Error writing Excel: {e}")
         return 0
@@ -274,8 +317,8 @@ class ColorManagerDialog(forms.Dialog[bool]):
     def load_color_map(self):
         self.color_map = read_color_map_from_excel(self.excel_path)
         if not self.color_map:
+            self.color_map = {}
             forms.MessageBox.Show("Error loading Excel file", "Error")
-            self.Close(False)
 
     def create_controls(self):
         self.key_label = forms.Label()
@@ -322,6 +365,10 @@ class ColorManagerDialog(forms.Dialog[bool]):
         self.select_button.Click += self.on_select_clicked
         self.select_button.Enabled = False
 
+        self.export_legend_button = forms.Button()
+        self.export_legend_button.Text = "Export Legend as PNG"
+        self.export_legend_button.Click += self.on_export_legend_clicked
+
         self.close_button = forms.Button()
         self.close_button.Text = "Close"
         self.close_button.Click += self.on_close_clicked
@@ -347,7 +394,7 @@ class ColorManagerDialog(forms.Dialog[bool]):
 
         button_layout = forms.DynamicLayout()
         button_layout.Spacing = drawing.Size(5, 5)
-        button_layout.AddRow(self.update_button, self.select_button, self.close_button)
+        button_layout.AddRow(self.update_button, self.select_button, self.export_legend_button, self.close_button)
         layout.AddRow(button_layout)
         layout.AddRow(self.status_label)
 
@@ -451,6 +498,119 @@ class ColorManagerDialog(forms.Dialog[bool]):
             rs.UnselectAllObjects()
             rs.SelectObjects(self.problem_objects)
             forms.MessageBox.Show(f"Selected {len(self.problem_objects)} objects with missing colors", "Objects Selected")
+
+    def on_export_legend_clicked(self, sender, e):
+        """Export the current legend as a PNG image"""
+        if not self.active_key or not self.color_map:
+            forms.MessageBox.Show("No legend to export. Select a key first.", "Export Legend")
+            return
+
+        key_colors = self.color_map.get(self.active_key, {})
+        if not key_colors:
+            forms.MessageBox.Show(f"No color definitions for key '{self.active_key}'.", "Export Legend")
+            return
+
+        # Ask for save location
+        png_path = rs.SaveFileName("Save Legend as PNG", "PNG Files (*.png)|*.png||",
+                                   filename=f"Legend_{self.active_key}.png")
+        if not png_path:
+            return
+
+        try:
+            # Layout constants
+            padding = 20
+            swatch_size = 24
+            swatch_gap = 10
+            row_height = 30
+            title_height = 35
+            sorted_values = sorted(key_colors.keys())
+
+            # Measure text to determine image width
+            measure_bmp = sdrawing.Bitmap(1, 1)
+            measure_gfx = sdrawing.Graphics.FromImage(measure_bmp)
+            title_font = sdrawing.Font("Arial", 14, sdrawing.FontStyle.Bold)
+            value_font = sdrawing.Font("Arial", 10)
+            rgb_font = sdrawing.Font("Arial", 9)
+
+            max_text_width = 0
+            for value in sorted_values:
+                color_rgb = key_colors[value]
+                value_text = value
+                rgb_text = f"  RGB({color_rgb[0]}, {color_rgb[1]}, {color_rgb[2]})"
+                full_text = value_text + rgb_text
+                text_size = measure_gfx.MeasureString(full_text, value_font)
+                if text_size.Width > max_text_width:
+                    max_text_width = text_size.Width
+
+            measure_gfx.Dispose()
+            measure_bmp.Dispose()
+
+            # Calculate image dimensions
+            img_width = int(padding + swatch_size + swatch_gap + max_text_width + padding + 20)
+            img_width = max(img_width, 300)
+            img_height = padding + title_height + len(sorted_values) * row_height + padding
+
+            # Create bitmap and draw
+            bmp = sdrawing.Bitmap(img_width, img_height)
+            gfx = sdrawing.Graphics.FromImage(bmp)
+            gfx.SmoothingMode = sdrawing.Drawing2D.SmoothingMode.AntiAlias
+            gfx.TextRenderingHint = sdrawing.Text.TextRenderingHint.AntiAlias
+
+            # White background
+            gfx.Clear(sdrawing.Color.White)
+
+            # Draw title
+            gfx.DrawString(self.active_key, title_font,
+                           sdrawing.Brushes.Black,
+                           sdrawing.PointF(padding, padding))
+
+            # Draw each legend entry
+            y = padding + title_height
+            for value in sorted_values:
+                color_rgb = key_colors[value]
+
+                # Color swatch
+                brush = sdrawing.SolidBrush(
+                    sdrawing.Color.FromArgb(color_rgb[0], color_rgb[1], color_rgb[2])
+                )
+                gfx.FillRectangle(brush,
+                                  padding, int(y), swatch_size, swatch_size)
+                # Swatch border
+                gfx.DrawRectangle(sdrawing.Pens.Gray,
+                                  padding, int(y), swatch_size, swatch_size)
+                brush.Dispose()
+
+                # Value text
+                text_x = padding + swatch_size + swatch_gap
+                gfx.DrawString(value, value_font,
+                               sdrawing.Brushes.Black,
+                               sdrawing.PointF(text_x, y))
+
+                # RGB text
+                rgb_text = f"  RGB({color_rgb[0]}, {color_rgb[1]}, {color_rgb[2]})"
+                value_size = gfx.MeasureString(value, value_font)
+                gfx.DrawString(rgb_text, rgb_font,
+                               sdrawing.Brushes.Gray,
+                               sdrawing.PointF(text_x + value_size.Width, y + 2))
+
+                y += row_height
+
+            # Save
+            bmp.Save(png_path, sdrawing.Imaging.ImageFormat.Png)
+
+            # Cleanup
+            title_font.Dispose()
+            value_font.Dispose()
+            rgb_font.Dispose()
+            gfx.Dispose()
+            bmp.Dispose()
+
+            self.status_label.Text = "Legend exported as PNG"
+            forms.MessageBox.Show(f"Legend exported!\n\n{os.path.basename(png_path)}", "Export Complete")
+
+        except Exception as ex:
+            print(f"Error exporting legend: {ex}")
+            forms.MessageBox.Show(f"Error exporting legend:\n{ex}", "Export Error")
 
     def on_close_clicked(self, sender, e):
         self.Close(True)
@@ -586,9 +746,14 @@ class DataVisualizationTool(forms.Dialog[bool]):
                                      filename="UniqueValuesColorSettings.xlsx")
         if not excel_path:
             return
+        file_existed = os.path.exists(excel_path)
         rows = write_color_map_excel(excel_path, kvd)
         self.status.Text = f"Step 2: {rows} values exported"
-        forms.MessageBox.Show(f"Excel generated!\n\nKeys: {len(kvd)}\nValues: {rows}\n\nNext: Fill RGB colors in Excel", "Complete")
+        msg = f"Excel generated!\n\nKeys: {len(kvd)}\nValues: {rows}"
+        if file_existed:
+            msg += "\n\nExisting color definitions were preserved."
+        msg += "\n\nNext: Fill RGB colors in Excel"
+        forms.MessageBox.Show(msg, "Complete")
         self.BringToFront()  # Return focus
 
     def on_step3(self, sender, e):
@@ -602,6 +767,7 @@ class DataVisualizationTool(forms.Dialog[bool]):
         # Launch Color Manager (child dialog)
         color_dlg = ColorManagerDialog(excel_path, objects)
         color_dlg.ShowModal(self)  # Modal to parent
+        color_dlg.Dispose()
         self.status.Text = "Step 3: Complete"
         self.BringToFront()  # Return focus
 
@@ -627,6 +793,7 @@ def main():
 
     dialog = DataVisualizationTool()
     dialog.ShowModal(None)
+    dialog.Dispose()
 
 
 if __name__ == "__main__":
