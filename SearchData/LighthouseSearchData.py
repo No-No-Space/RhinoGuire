@@ -28,14 +28,22 @@ class SearchCondition:
         obj_value_lower = obj_value.lower()
         search_value_lower = self.value.lower()
 
-        if self.match_type == "equals":
-            return obj_value_lower == search_value_lower
-        elif self.match_type == "contains":
+        if self.match_type == "contains":
             return search_value_lower in obj_value_lower
+        elif self.match_type == "equals":
+            return obj_value_lower == search_value_lower
         elif self.match_type == "starts_with":
             return obj_value_lower.startswith(search_value_lower)
         elif self.match_type == "ends_with":
             return obj_value_lower.endswith(search_value_lower)
+        elif self.match_type == "not_contains":
+            return search_value_lower not in obj_value_lower
+        elif self.match_type == "not_equals":
+            return obj_value_lower != search_value_lower
+        elif self.match_type == "not_starts_with":
+            return not obj_value_lower.startswith(search_value_lower)
+        elif self.match_type == "not_ends_with":
+            return not obj_value_lower.endswith(search_value_lower)
         return False
 
 
@@ -60,8 +68,12 @@ class ConditionRow:
         self.match_dropdown.Items.Add("Equals")
         self.match_dropdown.Items.Add("Starts with")
         self.match_dropdown.Items.Add("Ends with")
+        self.match_dropdown.Items.Add("Does not contain")
+        self.match_dropdown.Items.Add("Does not equal")
+        self.match_dropdown.Items.Add("Does not start with")
+        self.match_dropdown.Items.Add("Does not end with")
         self.match_dropdown.SelectedIndex = 0
-        self.match_dropdown.Width = 100
+        self.match_dropdown.Width = 140
 
         self.remove_button = forms.Button()
         self.remove_button.Text = "X"
@@ -87,7 +99,10 @@ class ConditionRow:
         if not key or not value:
             return None
 
-        match_types = ["contains", "equals", "starts_with", "ends_with"]
+        match_types = [
+            "contains", "equals", "starts_with", "ends_with",
+            "not_contains", "not_equals", "not_starts_with", "not_ends_with"
+        ]
         match_type = match_types[self.match_dropdown.SelectedIndex]
 
         return SearchCondition(key, value, match_type, self.is_exclude)
@@ -177,7 +192,7 @@ class LighthouseSearchDialog(forms.Dialog[bool]):
         val_lbl.Width = 150
         match_lbl = forms.Label()
         match_lbl.Text = "Match Type"
-        match_lbl.Width = 100
+        match_lbl.Width = 140
         include_header.Items.Add(forms.StackLayoutItem(key_lbl))
         include_header.Items.Add(forms.StackLayoutItem(val_lbl))
         include_header.Items.Add(forms.StackLayoutItem(match_lbl))
@@ -213,7 +228,7 @@ class LighthouseSearchDialog(forms.Dialog[bool]):
         val_lbl2.Width = 150
         match_lbl2 = forms.Label()
         match_lbl2.Text = "Match Type"
-        match_lbl2.Width = 100
+        match_lbl2.Width = 140
         exclude_header.Items.Add(forms.StackLayoutItem(key_lbl2))
         exclude_header.Items.Add(forms.StackLayoutItem(val_lbl2))
         exclude_header.Items.Add(forms.StackLayoutItem(match_lbl2))
