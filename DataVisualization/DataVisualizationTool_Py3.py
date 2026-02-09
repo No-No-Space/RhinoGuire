@@ -14,6 +14,7 @@ Version: 2.0 (Python 3 + Excel)
 
 import rhinoscriptsyntax as rs
 import scriptcontext as sc
+import Rhino
 import os
 from collections import defaultdict
 
@@ -248,7 +249,14 @@ def analyze_objects_for_key(objects, active_key):
 
 
 def apply_colors_to_objects(objects, active_key, color_map, default_color):
-    """Apply colors based on metadata"""
+    """Apply colors based on metadata - optimized with RhinoCommon direct access.
+
+    Key optimizations over rhinoscriptsyntax:
+    - Single pass: reads user text and applies color in one loop
+    - Redraw suppressed during batch operation
+    - Pre-computed System.Drawing.Color objects
+    - Direct attribute modification (bypasses rs.ObjectColor overhead)
+    """
     stats = {
         'colored': 0,
         'default': 0,
@@ -257,26 +265,52 @@ def apply_colors_to_objects(objects, active_key, color_map, default_color):
     }
 
     key_color_map = color_map.get(active_key, {})
-    analysis = analyze_objects_for_key(objects, active_key)
-    value_objects = analysis['value_objects']
-    objects_without_key = analysis['objects_without_key']
+
+    # Pre-compute System.Drawing.Color for each value
+    color_cache = {}
+    for value, rgba in key_color_map.items():
+        color_cache[value] = sdrawing.Color.FromArgb(rgba[0], rgba[1], rgba[2])
+    default_sys_color = sdrawing.Color.FromArgb(
+        default_color[0], default_color[1], default_color[2])
+    color_from_obj = Rhino.DocObjects.ObjectColorSource.ColorFromObject
+
     used_values = set()
+    missing_by_value = {}
 
-    for value, obj_list in value_objects.items():
-        used_values.add(value)
-        color = key_color_map.get(value)
-        if color:
-            for obj in obj_list:
-                rs.ObjectColor(obj, (color[0], color[1], color[2]))
-                stats['colored'] += 1
-        else:
-            for obj in obj_list:
-                rs.ObjectColor(obj, default_color)
-            stats['missing_color_definition'].append((value, obj_list))
+    # Disable viewport redraws during batch operation
+    sc.doc.Views.RedrawEnabled = False
+    try:
+        for obj_id in objects:
+            rhino_obj = sc.doc.Objects.FindId(rs.coerceguid(obj_id))
+            if not rhino_obj:
+                continue
 
-    for obj in objects_without_key:
-        rs.ObjectColor(obj, default_color)
-        stats['default'] += 1
+            value = rhino_obj.Attributes.GetUserString(active_key)
+            attrs = rhino_obj.Attributes.Duplicate()
+            attrs.ColorSource = color_from_obj
+
+            if not value:
+                attrs.ObjectColor = default_sys_color
+                sc.doc.Objects.ModifyAttributes(rhino_obj.Id, attrs, True)
+                stats['default'] += 1
+            else:
+                used_values.add(value)
+                sys_color = color_cache.get(value)
+                if sys_color:
+                    attrs.ObjectColor = sys_color
+                    sc.doc.Objects.ModifyAttributes(rhino_obj.Id, attrs, True)
+                    stats['colored'] += 1
+                else:
+                    attrs.ObjectColor = default_sys_color
+                    sc.doc.Objects.ModifyAttributes(rhino_obj.Id, attrs, True)
+                    if value not in missing_by_value:
+                        missing_by_value[value] = []
+                    missing_by_value[value].append(obj_id)
+    finally:
+        sc.doc.Views.RedrawEnabled = True
+
+    stats['missing_color_definition'] = [
+        (v, objs) for v, objs in missing_by_value.items()]
 
     excel_values = set(key_color_map.keys())
     unused = excel_values - used_values
@@ -289,11 +323,10 @@ def apply_colors_to_objects(objects, active_key, color_map, default_color):
 # COLOR MANAGER DIALOG (SCRIPT 03)
 # ============================================================================
 
-class ColorManagerDialog(forms.Dialog[bool]):
-    """Color Manager GUI"""
+class ColorManagerDialog(forms.Form):
+    """Color Manager GUI (modeless - allows Rhino interaction)"""
 
     def __init__(self, excel_path, objects):
-        # Initialize base Dialog class first
         super(ColorManagerDialog, self).__init__()
 
         self.excel_path = excel_path
@@ -369,6 +402,10 @@ class ColorManagerDialog(forms.Dialog[bool]):
         self.export_legend_button.Text = "Export Legend as PNG"
         self.export_legend_button.Click += self.on_export_legend_clicked
 
+        self.capture_viewport_button = forms.Button()
+        self.capture_viewport_button.Text = "Capture Viewport as PNG"
+        self.capture_viewport_button.Click += self.on_capture_viewport_clicked
+
         self.close_button = forms.Button()
         self.close_button.Text = "Close"
         self.close_button.Click += self.on_close_clicked
@@ -394,7 +431,8 @@ class ColorManagerDialog(forms.Dialog[bool]):
 
         button_layout = forms.DynamicLayout()
         button_layout.Spacing = drawing.Size(5, 5)
-        button_layout.AddRow(self.update_button, self.select_button, self.export_legend_button, self.close_button)
+        button_layout.AddRow(self.update_button, self.select_button)
+        button_layout.AddRow(self.export_legend_button, self.capture_viewport_button, self.close_button)
         layout.AddRow(button_layout)
         layout.AddRow(self.status_label)
 
@@ -612,19 +650,37 @@ class ColorManagerDialog(forms.Dialog[bool]):
             print(f"Error exporting legend: {ex}")
             forms.MessageBox.Show(f"Error exporting legend:\n{ex}", "Export Error")
 
+    def on_capture_viewport_clicked(self, sender, e):
+        """Capture the active Rhino viewport as a PNG image."""
+        png_path = rs.SaveFileName("Save Viewport as PNG", "PNG Files (*.png)|*.png||",
+                                   filename=f"Viewport_{self.active_key}.png")
+        if not png_path:
+            return
+
+        try:
+            view = sc.doc.Views.ActiveView
+            bmp = view.CaptureToBitmap(view.ActiveViewport.Size)
+            bmp.Save(png_path, sdrawing.Imaging.ImageFormat.Png)
+            bmp.Dispose()
+
+            self.status_label.Text = "Viewport captured as PNG"
+            forms.MessageBox.Show(f"Viewport captured!\n\n{os.path.basename(png_path)}", "Capture Complete")
+        except Exception as ex:
+            print(f"Error capturing viewport: {ex}")
+            forms.MessageBox.Show(f"Error capturing viewport:\n{ex}", "Capture Error")
+
     def on_close_clicked(self, sender, e):
-        self.Close(True)
+        self.Close()
 
 
 # ============================================================================
 # MAIN UNIFIED INTERFACE
 # ============================================================================
 
-class DataVisualizationTool(forms.Dialog[bool]):
-    """Main unified interface - stays on top"""
+class DataVisualizationTool(forms.Form):
+    """Main unified interface - modeless, allows Rhino interaction"""
 
     def __init__(self):
-        # Initialize base Dialog class first
         super(DataVisualizationTool, self).__init__()
 
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -764,15 +820,14 @@ class DataVisualizationTool(forms.Dialog[bool]):
                                      folder=self.excel_folder if os.path.exists(self.excel_folder) else None)
         if not excel_path:
             return
-        # Launch Color Manager (child dialog)
+        # Launch Color Manager as modeless form
         color_dlg = ColorManagerDialog(excel_path, objects)
-        color_dlg.ShowModal(self)  # Modal to parent
-        color_dlg.Dispose()
-        self.status.Text = "Step 3: Complete"
-        self.BringToFront()  # Return focus
+        color_dlg.Owner = Rhino.UI.RhinoEtoApp.MainWindow
+        color_dlg.Show()
+        self.status.Text = "Step 3: Color Manager opened"
 
     def on_close(self, sender, e):
-        self.Close(True)
+        self.Close()
 
 
 def main():
@@ -792,8 +847,8 @@ def main():
         return
 
     dialog = DataVisualizationTool()
-    dialog.ShowModal(None)
-    dialog.Dispose()
+    dialog.Owner = Rhino.UI.RhinoEtoApp.MainWindow
+    dialog.Show()
 
 
 if __name__ == "__main__":
