@@ -1,9 +1,34 @@
 #! python3
-"""
-Lighthouse Search Data Tool
-Advanced search tool for Rhino object metadata (User Keys/Values)
-Supports include/exclude conditions and pre-selection filtering.
-"""
+# # -*- coding: utf-8 -*-
+# __title__ = "Baquiano"                           # Name of the button displayed in Revit UI
+# __doc__ = """Version = 0.5
+# Date    = 2026-02-14
+# Author: Aquelon - aquelon@pm.me 
+# _____________________________________________________________________
+# Description:
+# Advanced search tool for Rhino object metadata (User Keys/Values)
+# Supports include/exclude conditions and pre-selection filtering.
+# _____________________________________________________________________
+# How-to:
+# -> Optionally pre-select objects in Rhino to limit the search scope
+# -> Run the script in Rhino 8 (RunPythonScript), a search window opens
+# -> Choose search scope: all objects in the model or only pre-selected objects
+# -> Add include conditions: type Key name, Value, and select a match type
+# -> Optionally add exclude conditions to filter out unwanted results
+# -> Use "+ Add" buttons to combine multiple conditions (AND for include, OR for exclude)
+# -> Click "Search" to find and select matching objects in the viewport
+# -> Match types: Contains, Equals, Starts/Ends with, and their negations (Does not...)
+# _____________________________________________________________________
+# Last update:
+# - [14.02.2026] - 0.5 RELEASE
+# _____________________________________________________________________
+# To-Do:
+# - UI needs improvement, it is functional at the moment, but default look.
+# - Default folder locations need to be updated to neutral locations (desktop or documents) instead of script folder.
+# - Change the behaviour to allow the window be open and select objects to avoid the need to close and re-run the script.
+# - Evaluate if it is possible to add a function to autocomplete the keys available in the model, this way the user can select from existing keys instead of writing them, this will reduce the chances of typos and make it more user friendly.
+# _____________________________________________________________________
+
 
 import rhinoscriptsyntax as rs
 import Rhino

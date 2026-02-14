@@ -1,13 +1,31 @@
 #! python3
-
-"""
-DataExporterImporter for Rhino 8
-Exports and imports object User Keys/Values to/from Excel files using GUID tracking.
-
-Author: Aksel
-Date: 2025-02-04
-"""
-
+# # -*- coding: utf-8 -*-
+# __title__ = "Arriero"                            # Name of the button displayed in Revit UI
+# __doc__ = """Version = 0.5
+# Date    = 2026-02-14
+# Author: Aquelon - aquelon@pm.me 
+# _____________________________________________________________________
+# Description:
+# DataExporterImporter for Rhino 8
+# Exports and imports object User Keys/Values to/from Excel files using GUID tracking.
+# _____________________________________________________________________
+# How-to:
+# -> Run the script in Rhino 8 (RunPythonScript)
+# -> A window opens with Export and Import buttons and import options
+# -> To export: Click "Export Data", select objects, choose save location
+# -> To import: Configure options (backup, create keys, empty cells), click "Import Data"
+# -> Select the Excel file, review the summary report
+# -> Tip: Use "Apply only to pre-selected objects" to limit new key creation scope
+# _____________________________________________________________________
+# Last update:
+# - [14.02.2026] - 0.5 RELEASE
+# _____________________________________________________________________
+# To-Do:
+# - UI needs improvement, it is functional at the moment, but default look.
+# - Default folder locations need to be updated to neutral locations (desktop or documents) instead of script folder.
+# - Add function that erase keys on objects if they are not present in Excel file, this will allow to use the tool for cleaning up objects by erasing the columns in Excel.
+# Update the logic of the import with empty cells, it seems tha is bit mixed right now. If the cells are emptied in an object, it is possible to erase the key in that object, but this logic may not be transparent for the user.
+# _____________________________________________________________________
 # r: openpyxl
 
 import rhinoscriptsyntax as rs

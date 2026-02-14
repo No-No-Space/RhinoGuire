@@ -1,15 +1,35 @@
 #! python3
-
-"""
-Data Visualization Tool - Unified Interface (Python 3 / Excel Version)
-A single GUI for the complete metadata visualization workflow using Excel files.
-
-FULLY SELF-CONTAINED - No external script dependencies
-
-Author: RhinoGuire
-Version: 2.0 (Python 3 + Excel)
-"""
-
+# # -*- coding: utf-8 -*-
+# __title__ = "Chivito"                           # Name of the button displayed in Revit UI
+# __doc__ = """Version = 0.5
+# Date    = 2026-02-14
+# Author: Aquelon - aquelon@pm.me 
+# _____________________________________________________________________
+# Description:
+# Data Visualization Tool - Unified Interface (Python 3 / Excel Version)
+# A single GUI for the complete metadata visualization workflow using Excel files.
+# FULLY SELF-CONTAINED - No external script dependencies
+# _____________________________________________________________________
+# How-to:
+# -> Run the script in Rhino 8 (RunPythonScript), a modeless window opens
+# -> Step 1: Click "Select Excel & Apply Keys", pick an Excel template, select objects
+# -> Step 2: Click "Scan & Generate Excel", select objects, save the color mapping file
+# -> Open the exported Excel in a spreadsheet editor and fill in the R, G, B, A columns
+# -> Step 3: Click "Open Color Manager", select objects, pick the color Excel file
+# -> In the Color Manager: select a key from the dropdown, click "Update Colors"
+# -> Use "Export Legend as PNG" or "Capture Viewport as PNG" for presentations
+# -> The window is non-blocking, you can interact with Rhino while it is open
+# _____________________________________________________________________
+# Last update:
+# - [14.02.2026] - 0.5 RELEASE
+# _____________________________________________________________________
+# To-Do:
+# - UI needs improvement, it is functional at the moment, but default look.
+# - Default folder locations need to be updated to neutral locations (desktop or documents) instead of script folder.
+# - Add a button to create an Excel template, before it was a separate script, but it may be more intuitive to have it integrated in the workflow, this way the user can create the template and fill it with colors before applying it to the objects.
+# The script window needs to be closed before editing the Excel file exported. Correct this, so the file is freed after export.
+# - Correct that the ViewCaptureToFile allows for interaction with the menu from Rhino, so the user cna define the settings of the capture.
+# _____________________________________________________________________
 # r: openpyxl
 
 import rhinoscriptsyntax as rs
