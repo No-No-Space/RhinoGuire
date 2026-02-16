@@ -671,23 +671,10 @@ class ColorManagerDialog(forms.Form):
             forms.MessageBox.Show(f"Error exporting legend:\n{ex}", "Export Error")
 
     def on_capture_viewport_clicked(self, sender, e):
-        """Capture the active Rhino viewport as a PNG image."""
-        png_path = rs.SaveFileName("Save Viewport as PNG", "PNG Files (*.png)|*.png||",
-                                   filename=f"Viewport_{self.active_key}.png")
-        if not png_path:
-            return
-
-        try:
-            view = sc.doc.Views.ActiveView
-            bmp = view.CaptureToBitmap(view.ActiveViewport.Size)
-            bmp.Save(png_path, sdrawing.Imaging.ImageFormat.Png)
-            bmp.Dispose()
-
-            self.status_label.Text = "Viewport captured as PNG"
-            forms.MessageBox.Show(f"Viewport captured!\n\n{os.path.basename(png_path)}", "Capture Complete")
-        except Exception as ex:
-            print(f"Error capturing viewport: {ex}")
-            forms.MessageBox.Show(f"Error capturing viewport:\n{ex}", "Capture Error")
+        """Open Rhino's ViewCaptureToFile dialog for viewport capture."""
+        self.status_label.Text = "Opening viewport capture settings..."
+        Rhino.RhinoApp.RunScript("ViewCaptureToFile", False)
+        self.status_label.Text = "Viewport capture complete"
 
     def on_close_clicked(self, sender, e):
         self.Close()
