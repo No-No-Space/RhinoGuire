@@ -1,0 +1,15 @@
+name: RhinoGuire
+version: 0.1.0
+author: Aksel Alvarez 2026
+description: >
+  RhinoGuire - A collection of Python scripts for Rhino 8.
+  Tools for area measurement, data export/import, data visualization,
+  mesh tools, and object search.
+url: https://github.com/No-No-Space/RhinoGuire
+keywords:
+  - rhinoguire
+  - python
+  - bim
+  - data
+  - mesh
+rhino: ">=8.0"
