@@ -1,26 +1,28 @@
 #! python3
 # -*- coding: utf-8 -*-
 # __title__ = "Sebucan"
-# __doc__ = """Version = 0.3
-# Date    = 2026-03-02
+# __doc__ = """Version = 0.4
+# Date    = 2026-03-03
 # _____________________________________________________________________
 # Description:
-# Wraps one or more source meshes onto a destination object along the Z axis.
+# Wraps one or more source objects onto a destination object along the Z axis.
 # Each vertex of the source mesh is projected (raycast) vertically onto the
 # destination geometry, preserving its X/Y position and snapping its Z.
-# Destination can be a Mesh, SubD, Surface, or Polysurface (solid included).
+# Both source and destination accept Mesh, SubD, Surface (incl. trimmed),
+# or Polysurface. Non-mesh sources are converted to mesh before wrapping.
 # Typical use case: adjusting road meshes to follow the contours of a terrain.
 # The window is modeless — Rhino stays accessible while it is open.
 # _____________________________________________________________________
 # How-to:
 # -> Run the script in Rhino 8 (RunPythonScript). The Sebucan panel opens.
 # -> Click "Select Destination" and pick the target geometry (terrain, solid…).
-# -> Click "Select Source Mesh(es)" and pick the mesh(es) to be wrapped (roads).
+# -> Click "Select Source(s)" and pick the object(s) to be wrapped (roads, surfaces…).
 # -> Optionally enable "Replace source mesh(es)" to delete the originals.
 # -> Click "Wrap!" to run the projection. New meshes are added to the same layer.
 # -> Vertices outside the destination bounding box keep their original Z.
 # _____________________________________________________________________
 # Last update:
+# - [03.03.2026] - 0.4 Source now accepts Mesh, SubD, Surface (trimmed), Polysurface
 # - [02.03.2026] - 0.3 Adaptive refinement: splits faces where Z deviation exceeds tolerance
 # - [02.03.2026] - 0.2 Destination now accepts Mesh, SubD, Surface, Polysurface
 # - [02.03.2026] - 0.1 Initial release
@@ -34,12 +36,14 @@ import Eto.Drawing as drawing
 import Eto.Forms as forms
 import scriptcontext as sc
 
-# Selection filter: mesh + surface + polysurface + SubD
+# Selection filter: mesh + surface (trimmed included) + polysurface + SubD
 _DEST_FILTER = rs.filter.mesh | rs.filter.surface | rs.filter.polysurface
 try:
     _DEST_FILTER |= rs.filter.subd
 except AttributeError:
     pass  # older build without SubD filter constant
+
+_SRC_FILTER = _DEST_FILTER  # sources accept the same geometry types
 
 
 # ---------------------------------------------------------------------------
@@ -57,13 +61,13 @@ def _brep_to_mesh(brep):
     return joined
 
 
-def coerce_to_destination_mesh(obj_id):
-    """Convert a Mesh, SubD, Surface, or Polysurface to a Mesh for ray intersection.
+def coerce_to_mesh(obj_id):
+    """Convert a Mesh, SubD, Surface, Trimmed Surface, or Polysurface to a Mesh.
 
     Conversion order:
-      Mesh       → used directly
-      BRep       → Mesh.CreateFromBrep
-      SubD       → SubD.ToBrep → Mesh.CreateFromBrep
+      Mesh           → used directly
+      BRep           → Mesh.CreateFromBrep  (honours trim boundaries)
+      SubD           → SubD.ToBrep → Mesh.CreateFromBrep
 
     Returns the Mesh, or None if conversion fails.
     """
@@ -328,18 +332,18 @@ class SebucanForm(forms.Form):
 
         # Step 2 — Sources
         s2_lbl = forms.Label()
-        s2_lbl.Text = "2 — Source Mesh(es)  (e.g., roads)"
+        s2_lbl.Text = "2 — Source  (mesh, surface, polysurface…)"
         s2_lbl.Font = drawing.Font(drawing.SystemFont.Bold)
         layout.AddRow(s2_lbl)
 
         self.src_btn = forms.Button()
-        self.src_btn.Text = "Select Source Mesh(es)"
+        self.src_btn.Text = "Select Source(s)"
         self.src_btn.Enabled = False
         self.src_btn.Click += self.on_select_sources
         layout.AddRow(self.src_btn)
 
         self.src_info = forms.Label()
-        self.src_info.Text = "No sources selected."
+        self.src_info.Text = "No source objects selected."
         self.src_info.TextColor = drawing.Colors.Gray
         layout.AddRow(self.src_info)
 
@@ -459,12 +463,12 @@ class SebucanForm(forms.Form):
         self.dest_info.Text = f"\u2713 {name}  [{type_label}]"
         self.dest_info.TextColor = drawing.Colors.Green
         self.src_btn.Enabled = True
-        self._set_status("Destination set. Now select source mesh(es).")
+        self._set_status("Destination set. Now select source object(s).")
         self._update_wrap_btn()
 
     def on_select_sources(self, sender, e):
-        self._set_status("Select source mesh(es) in the viewport…")
-        obj_ids = rs.GetObjects("Select source mesh(es)", rs.filter.mesh, preselect=True)
+        self._set_status("Select source object(s) in the viewport…")
+        obj_ids = rs.GetObjects("Select source (mesh, surface, polysurface, SubD)", _SRC_FILTER, preselect=True)
 
         if not obj_ids:
             self._set_status("Source selection cancelled.")
@@ -472,9 +476,9 @@ class SebucanForm(forms.Form):
 
         self.source_ids = list(obj_ids)
         n = len(self.source_ids)
-        self.src_info.Text = f"\u2713 {n} mesh(es) selected"
+        self.src_info.Text = f"\u2713 {n} object(s) selected"
         self.src_info.TextColor = drawing.Colors.Green
-        self._set_status(f"{n} source mesh(es) ready. Click Wrap! to process.")
+        self._set_status(f"{n} source object(s) ready. Click Wrap! to process.")
         self._update_wrap_btn()
 
     # ------------------------------------------------------------------
@@ -485,7 +489,7 @@ class SebucanForm(forms.Form):
         self.wrap_btn.Enabled = False
         self._set_status("Converting destination to mesh…")
 
-        dest_mesh = coerce_to_destination_mesh(self.dest_id)
+        dest_mesh = coerce_to_mesh(self.dest_id)
         if dest_mesh is None:
             self._set_status("Error: could not convert destination to mesh.", drawing.Colors.Red)
             self.wrap_btn.Enabled = True
@@ -510,7 +514,7 @@ class SebucanForm(forms.Form):
             label = "adaptive" if use_adaptive else "projecting"
             self._set_status(f"Wrapping mesh {idx + 1} of {n_src} ({label})…")
 
-            src_mesh = rs.coercemesh(src_id)
+            src_mesh = coerce_to_mesh(src_id)
             if src_mesh is None:
                 continue
 
