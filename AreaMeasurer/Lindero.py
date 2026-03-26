@@ -386,13 +386,20 @@ def format_s2(data, layer_name, obj_key, unit):
     ]
     for o in data["objects"]:
         lines.append(_row(o["name"][:36], _fmt(o["area"])))
+    overlap = raw_sum - data["total"]
     lines += [
         _rule("─"),
         _row("Sum (individual totals)", _fmt(raw_sum)),
         _row(f"TOTAL (footprint, overlaps merged){union_note}", _fmt(data["total"])),
-        _rule(),
-        "",
     ]
+    if overlap > 1e-6:
+        lines += [
+            _rule("─"),
+            _row("  [!] Overlapping area (sum - total)", _fmt(overlap)),
+            "      Some objects share footprint area.",
+            "      Verify whether double-counting is intentional.",
+        ]
+    lines += [_rule(), ""]
     return "\n".join(lines)
 
 
@@ -438,6 +445,21 @@ def format_s3(data, parent_layer, obj_key, grp_key, unit):
                 lines.append("  " + "·" * (W - 2))
                 for o in sl_data["objects"]:
                     lines.append(_row(o["name"][:36], _fmt(o["area"])))
+
+        # Overlap warning
+        individual_sum = sum(o["area"] for o in sl_data["objects"])
+        group_sum = sum(sl_data["group_totals"].values()) if sl_data["group_totals"] else individual_sum
+        total_overlap = individual_sum - sl_data["total"]
+        cross_group_overlap = group_sum - sl_data["total"]
+        if total_overlap > 1e-6:
+            lines += [
+                _rule("─"),
+                _row("  [!] Overlapping area (sum - total)", _fmt(total_overlap)),
+            ]
+            if grp_key and cross_group_overlap > 1e-6:
+                lines.append(_row("      of which cross-group overlap", _fmt(cross_group_overlap)))
+            lines.append("      Some objects share footprint area.")
+            lines.append("      Verify whether double-counting is intentional.")
         lines.append("")
 
     lines += [
@@ -856,6 +878,9 @@ _SEC_FILL  = PatternFill(fill_type="solid", fgColor="D9E1F2")   # light blue
 _TOT_FONT  = Font(bold=True)
 _TOT_FILL  = PatternFill(fill_type="solid", fgColor="F2F2F2")   # light grey
 
+_WARN_FONT = Font(bold=True, color="7F6000")
+_WARN_FILL = PatternFill(fill_type="solid", fgColor="FFE699")   # amber
+
 _AREA_FMT  = "#,##0.0000"
 
 
@@ -888,6 +913,21 @@ def _tot(ws, row, label, value):
     vc.font = _TOT_FONT
     vc.fill = _TOT_FILL
     vc.number_format = _AREA_FMT
+    return row + 1
+
+
+def _warn(ws, row, label, value=None, n_cols=2):
+    """Write an amber-highlighted warning row. Value (float) goes in column 2."""
+    lc = ws.cell(row=row, column=1, value=label)
+    lc.font = _WARN_FONT
+    lc.fill = _WARN_FILL
+    for ci in range(2, n_cols + 1):
+        ws.cell(row=row, column=ci).fill = _WARN_FILL
+    if value is not None:
+        vc = ws.cell(row=row, column=2, value=value)
+        vc.font = _WARN_FONT
+        vc.fill = _WARN_FILL
+        vc.number_format = _AREA_FMT
     return row + 1
 
 
@@ -965,6 +1005,13 @@ def _xl_s2(wb, data, unit):
             vc.number_format = _AREA_FMT
         row += 1
 
+    overlap = raw_sum - data["total"]
+    if overlap > 1e-6:
+        row += 1
+        row = _sec(ws2, row, "[!] Overlap Warning", n_cols=2)
+        row = _warn(ws2, row, "Overlapping area (sum - total)", overlap)
+        row = _warn(ws2, row, "Some objects share footprint area. Verify whether double-counting is intentional.")
+
 
 def _xl_s3(wb, data, unit):
     params    = data["params"]
@@ -1031,6 +1078,35 @@ def _xl_s3(wb, data, unit):
                 ws2.cell(row, 2, gv)
                 ws2.cell(row, 3, ga).number_format = _AREA_FMT
                 row += 1
+
+    # Overlap warnings (one row per level that has overlapping objects)
+    levels_with_overlap = []
+    for sl, sl_data in data["sublayers"].items():
+        individual_sum = sum(o["area"] for o in sl_data["objects"])
+        total_overlap = individual_sum - sl_data["total"]
+        if total_overlap > 1e-6:
+            group_sum = sum(sl_data["group_totals"].values()) if sl_data["group_totals"] else individual_sum
+            cross_group = group_sum - sl_data["total"]
+            levels_with_overlap.append((short_name(sl), total_overlap, cross_group))
+
+    if levels_with_overlap:
+        row += 1
+        n_warn_cols = 3 if has_grp else 2
+        row = _sec(ws2, row, "[!] Overlap Warnings by Level", n_cols=n_warn_cols)
+        ws2.cell(row, 1, "Level").font = Font(bold=True)
+        ws2.cell(row, 2, f"Overlapping Area ({unit})").font = Font(bold=True)
+        if has_grp:
+            ws2.cell(row, 3, f"of which Cross-group ({unit})").font = Font(bold=True)
+        row += 1
+        for level_name, total_ov, cross_ov in levels_with_overlap:
+            row = _warn(ws2, row, level_name, total_ov, n_cols=n_warn_cols)
+            if has_grp and cross_ov > 1e-6:
+                vc = ws2.cell(row - 1, 3, cross_ov)
+                vc.font = _WARN_FONT
+                vc.fill = _WARN_FILL
+                vc.number_format = _AREA_FMT
+        row += 1
+        row = _warn(ws2, row, "Some objects share footprint area. Verify whether double-counting is intentional.", n_cols=n_warn_cols)
 
 
 def export_to_excel(data, filepath):
