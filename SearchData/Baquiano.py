@@ -174,7 +174,8 @@ class BaquianoSearchForm(forms.Form):
         self.Title = "Baquiano Search Data"
         self.Padding = drawing.Padding(10)
         self.Resizable = True
-        self.MinimumSize = drawing.Size(600, 450)
+        self.MinimumSize = drawing.Size(480, 480)
+        self.ClientSize  = drawing.Size(640, 580)
         self.Owner = Rhino.UI.RhinoEtoApp.MainWindow
         self.create_controls()
 
@@ -332,7 +333,13 @@ class BaquianoSearchForm(forms.Form):
         self.status_label.TextColor = drawing.Colors.Gray
         layout.AddRow(self.status_label)
 
-        self.Content = layout
+        # Wrap the whole layout in a Scrollable so the form stays a fixed size
+        # even when many conditions are added.
+        outer_scroll = forms.Scrollable()
+        outer_scroll.ExpandContentWidth = True
+        outer_scroll.ExpandContentHeight = False
+        outer_scroll.Content = layout
+        self.Content = outer_scroll
 
         # Add first include condition by default
         self.add_include_condition()

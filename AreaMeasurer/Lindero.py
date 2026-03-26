@@ -2,8 +2,8 @@
 # r: openpyxl
 # -*- coding: utf-8 -*-
 # __title__ = "Lindero"
-# __doc__ = """Version = 0.2
-# Date    = 2026-02-20
+# __doc__ = """Version = 0.3
+# Date    = 2026-03-26
 # Author: Aquelon - aquelon@pm.me
 # _____________________________________________________________________
 # Description:
@@ -11,36 +11,32 @@
 # "Footprint" = the plan area (XY projection), NOT the sum of all surfaces.
 # Modeless window — Rhino stays accessible while it is open.
 # _____________________________________________________________________
-# Three scenarios:
+# Five scenarios:
 #   S1 — Selected Objects:
 #        Individual footprint per object, no overlap handling.
-#        Results: area per object + total.
 #
 #   S2 — By Layer:
-#        All objects on a layer. Overlapping footprints are merged with a
+#        All objects on a layer. Overlapping footprints merged with a
 #        Boolean Union to avoid double-counting.
-#        Results: area per object key + combined layer total.
 #
 #   S3 — By Layer Hierarchy:
 #        Parent layer contains sublayers (each sublayer = one level/floor).
-#        Objects carry two user text keys: an object key (individual name)
-#        and a group key (department / class).
+#        Objects carry two user text keys: an object key and a group key.
 #        Overlaps removed within each sublayer.
-#        Results: per object, per group subtotal, per sublayer total, grand total.
-# _____________________________________________________________________
-# How-to:
-# -> Run the script; the calculator window opens (modeless)
-# -> S1: Select objects in Rhino while the form is open, then click Calculate
-# -> S2: Pick a Layer and an Object Key, click Calculate
-# -> S3: Pick a Parent Layer, Object Key, and Group Key, click Calculate
-# -> Click "Refresh Model" if you add new layers or user text keys
+#
+#   S4 — Room Analysis:
+#        Aggregates individual areas by Object Key (S3) across all floors.
+#        Compares totals to a Room Target Key (set in Settings).
+#        Bullet chart per room type.
+#
+#   S5 — Group Analysis:
+#        Same as S4 but aggregates by Group Key and compares to Group Target Key.
 # _____________________________________________________________________
 # Last update:
+# - [26.03.2026] - 0.3 Settings tab, S4/S5 bullet-chart analysis, Write Area,
+#                     per-tab results areas, overlap warnings
 # - [20.02.2026] - 0.2 Export results to Excel (Objects + Summary sheets)
 # - [20.02.2026] - 0.1 Initial release
-# _____________________________________________________________________
-# To-Do:
-# - Compare calculated areas against Excel-defined area goals
 # _____________________________________________________________________
 
 
@@ -53,6 +49,8 @@ import Eto.Forms as forms
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+import json
+import System
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -66,7 +64,7 @@ def get_all_user_text_keys():
         return []
     keys = set()
     for guid in all_objects:
-        obj_keys = rs.GetUserText(guid)  # returns list of key strings
+        obj_keys = rs.GetUserText(guid)
         if obj_keys:
             for k in obj_keys:
                 keys.add(k)
@@ -89,10 +87,7 @@ def get_layer_objects(layer_name):
 
 
 def get_child_layers(parent_layer_name):
-    """
-    Return full path names of direct child layers of the given layer.
-    Uses string matching on layer names to avoid RhinoCommon attribute differences.
-    """
+    """Return full path names of direct child layers of the given layer."""
     prefix = parent_layer_name + "::"
     return sorted(
         name for name in (rs.LayerNames() or [])
@@ -140,7 +135,6 @@ def _brep_footprint_curves(brep):
     tol = sc.doc.ModelAbsoluteTolerance
     proj = rg.Transform.PlanarProjection(rg.Plane.WorldXY)
 
-    # Gather all horizontal faces (|normalZ| > 0.9) with their centroid Z
     horiz = []
     for face in brep.Faces:
         u = (face.Domain(0).Min + face.Domain(0).Max) * 0.5
@@ -151,7 +145,6 @@ def _brep_footprint_curves(brep):
             horiz.append((face, pt.Z))
 
     if not horiz:
-        # No horizontal faces → bounding-box fallback
         bbox = brep.GetBoundingBox(True)
         if not bbox.IsValid:
             return []
@@ -164,7 +157,6 @@ def _brep_footprint_curves(brep):
         ]
         return [rg.PolylineCurve(pts)]
 
-    # Keep only the bottom-most horizontal face(s)
     min_z = min(z for _, z in horiz)
     bottom = [f for f, z in horiz if abs(z - min_z) <= tol * 100]
 
@@ -192,7 +184,6 @@ def get_footprint_curves(obj_guid):
         return []
     geom = rhobj.Geometry
 
-    # Extrusion and Surface → convert to Brep for uniform handling
     if isinstance(geom, (rg.Extrusion, rg.Surface)):
         brep = geom.ToBrep()
         if brep:
@@ -201,14 +192,12 @@ def get_footprint_curves(obj_guid):
     if isinstance(geom, rg.Brep):
         return _brep_footprint_curves(geom)
 
-    # Closed planar curve (e.g., a flat hatch boundary used as a space outline)
     if isinstance(geom, rg.Curve) and geom.IsClosed and geom.IsPlanar():
         proj = rg.Transform.PlanarProjection(rg.Plane.WorldXY)
         dup = geom.DuplicateCurve()
         dup.Transform(proj)
         return [dup]
 
-    # Fallback: bounding box
     fallback = _bbox_footprint(obj_guid)
     return [fallback] if fallback else []
 
@@ -251,7 +240,6 @@ def combined_area(obj_guids):
     if unioned and len(unioned) > 0:
         return sum(curve_area(c) for c in unioned), True
 
-    # Boolean union failed — return plain sum (may double-count overlaps)
     return sum(curve_area(c) for c in all_curves), False
 
 
@@ -270,18 +258,15 @@ def _label(guid, key):
 
 
 def calc_s1(name_key):
-    """
-    Scenario 1 — Selected objects.
-    Returns list of {name, area}.
-    """
+    """Scenario 1 — Selected objects. Returns list of {guid, name, area}."""
     guids = rs.SelectedObjects() or []
     return [{"guid": str(g), "name": _label(g, name_key), "area": get_footprint_area(g)} for g in guids]
 
 
 def calc_s2(layer_name, obj_key):
     """
-    Scenario 2 — All objects on one layer, footprints merged to avoid double-counting.
-    Returns {objects: [{name, area}], total: float, union_ok: bool}.
+    Scenario 2 — All objects on one layer, footprints merged.
+    Returns {objects, total, union_ok}.
     """
     guids = get_layer_objects(layer_name)
     per_obj = [{"guid": str(g), "name": _label(g, obj_key), "area": get_footprint_area(g)} for g in guids]
@@ -291,13 +276,8 @@ def calc_s2(layer_name, obj_key):
 
 def calc_s3(parent_layer, obj_key, grp_key):
     """
-    Scenario 3 — Sublayer hierarchy (each sublayer = one floor/level).
-    Overlaps removed within each sublayer independently.
-    Grand total = sum of per-sublayer totals (floors are additive).
-    Returns {
-        sublayers: {name: {objects, group_totals, total, union_ok}},
-        overall_total: float
-    }.
+    Scenario 3 — Sublayer hierarchy. Overlaps removed per sublayer.
+    Returns {sublayers: {name: {objects, group_totals, total, union_ok}}, overall_total}.
     """
     result = {"sublayers": {}, "overall_total": 0.0}
     for sl in get_child_layers(parent_layer):
@@ -309,7 +289,7 @@ def calc_s3(parent_layer, obj_key, grp_key):
             continue
 
         objects = []
-        groups = {}  # group_val → list[guid]
+        groups = {}
         for guid in guids:
             grp_val = (rs.GetUserText(guid, grp_key) if grp_key else None) or "—"
             objects.append({
@@ -332,6 +312,82 @@ def calc_s3(parent_layer, obj_key, grp_key):
         result["overall_total"] += total
 
     return result
+
+
+def calc_s4(parent_layer, obj_key, room_target_key):
+    """
+    Scenario 4 — Room Analysis.
+    Sums individual footprint areas across all sublayers, grouped by obj_key value.
+    Compares each group total to room_target_key.
+    Returns {entries: [{label, measured, goal}], warnings: [str]}.
+    """
+    buckets = {}
+    for sl in get_child_layers(parent_layer):
+        for guid in (get_layer_objects(sl) or []):
+            nv = (rs.GetUserText(guid, obj_key) if obj_key else None)
+            if not nv:
+                nv = rs.ObjectName(guid) or (str(guid)[:8] + "…")
+            area = get_footprint_area(guid)
+            if nv not in buckets:
+                buckets[nv] = {"area": area, "guids": [guid]}
+            else:
+                buckets[nv]["area"] += area
+                buckets[nv]["guids"].append(guid)
+
+    entries, warnings = [], []
+    for nv, bkt in sorted(buckets.items()):
+        goal = None
+        if room_target_key:
+            for guid in bkt["guids"]:
+                raw = rs.GetUserText(guid, room_target_key)
+                if raw:
+                    try:
+                        goal = float(raw)
+                        break
+                    except (ValueError, TypeError):
+                        pass
+            if goal is None:
+                warnings.append(f"[!] Room Target Key '{room_target_key}' not found on '{nv}'")
+        entries.append({"label": nv, "measured": bkt["area"], "goal": goal})
+
+    return {"entries": entries, "warnings": warnings}
+
+
+def calc_s5(parent_layer, grp_key, grp_target_key):
+    """
+    Scenario 5 — Group Analysis.
+    Sums individual footprint areas across all sublayers, grouped by grp_key value.
+    Compares each group total to grp_target_key.
+    Returns {entries: [{label, measured, goal}], warnings: [str]}.
+    """
+    buckets = {}
+    for sl in get_child_layers(parent_layer):
+        for guid in (get_layer_objects(sl) or []):
+            nv = (rs.GetUserText(guid, grp_key) if grp_key else None) or "—"
+            area = get_footprint_area(guid)
+            if nv not in buckets:
+                buckets[nv] = {"area": area, "guids": [guid]}
+            else:
+                buckets[nv]["area"] += area
+                buckets[nv]["guids"].append(guid)
+
+    entries, warnings = [], []
+    for nv, bkt in sorted(buckets.items()):
+        goal = None
+        if grp_target_key:
+            for guid in bkt["guids"]:
+                raw = rs.GetUserText(guid, grp_target_key)
+                if raw:
+                    try:
+                        goal = float(raw)
+                        break
+                    except (ValueError, TypeError):
+                        pass
+            if goal is None:
+                warnings.append(f"[!] Group Target Key '{grp_target_key}' not found on '{nv}'")
+        entries.append({"label": nv, "measured": bkt["area"], "goal": goal})
+
+    return {"entries": entries, "warnings": warnings}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -472,6 +528,126 @@ def format_s3(data, parent_layer, obj_key, grp_key, unit):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Bullet chart drawing helpers (S4 / S5)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_CHART_ROW_H   = 54
+_CHART_LABEL_W = 128
+_CHART_VALUE_W = 108
+_CHART_BAR_H   = 18
+
+
+def _rgb(r, g, b):
+    """Create an Eto.Drawing.Color from 0-255 integer RGB values."""
+    return drawing.Color(r / 255.0, g / 255.0, b / 255.0)
+
+
+def _draw_bullet_row(g, i, entry, tol, unit, total_w):
+    """Draw one bullet-chart row at vertical slot i."""
+    y0    = i * _CHART_ROW_H + 4
+    label = entry["label"]
+    meas  = entry["measured"]
+    goal  = entry.get("goal")
+
+    font    = drawing.Font("Arial", 8)
+    sm_font = drawing.Font("Arial", 7)
+    c_black = _rgb(0, 0, 0)
+
+    # Left label (truncated)
+    g.DrawText(font, c_black,
+               drawing.PointF(4.0, float(y0 + (_CHART_ROW_H - 12) // 2)),
+               label[:17])
+
+    chart_x = float(_CHART_LABEL_W)
+    chart_w = float(total_w - _CHART_LABEL_W - _CHART_VALUE_W)
+    bar_y   = float(y0 + (_CHART_ROW_H - _CHART_BAR_H) // 2)
+    bar_h   = float(_CHART_BAR_H)
+
+    if chart_w < 10:
+        return
+
+    if goal is None or goal <= 0:
+        g.DrawText(font, _rgb(160, 60, 60),
+                   drawing.PointF(chart_x + 4.0, bar_y),
+                   f"{meas:,.2f} (no target)")
+        return
+
+    max_val = max(goal * 1.35, meas * 1.05) if meas > goal else goal * 1.35
+    if max_val <= 0:
+        return
+
+    def px(v):
+        return chart_x + float(v) / max_val * chart_w
+
+    # 1. Grey background
+    g.FillRectangle(_rgb(215, 215, 215),
+                    drawing.RectangleF(chart_x, bar_y, chart_w, bar_h))
+
+    # 2. Yellow zone: goal*(1-tol) → goal
+    yl = px(max(0.0, goal * (1.0 - tol)))
+    yr = px(goal)
+    if yr > yl:
+        g.FillRectangle(_rgb(255, 235, 100),
+                        drawing.RectangleF(yl, bar_y, yr - yl, bar_h))
+
+    # 3. Orange zone: goal → goal*(1+tol)
+    ol  = px(goal)
+    or_ = px(min(max_val, goal * (1.0 + tol)))
+    if or_ > ol:
+        g.FillRectangle(_rgb(255, 180, 70),
+                        drawing.RectangleF(ol, bar_y, or_ - ol, bar_h))
+
+    # 4. Measured bar
+    mx = px(meas) - chart_x
+    if mx > 0:
+        g.FillRectangle(_rgb(70, 100, 145),
+                        drawing.RectangleF(chart_x, bar_y,
+                                           min(float(mx), chart_w), bar_h))
+
+    # 5. Goal line (2 px)
+    gx = px(goal)
+    g.DrawLine(drawing.Pen(_rgb(30, 30, 30), 2.0),
+               drawing.PointF(gx, bar_y - 2.0),
+               drawing.PointF(gx, bar_y + bar_h + 2.0))
+
+    # 6. Tolerance marker lines
+    tpen = drawing.Pen(_rgb(120, 120, 120), 1.0)
+    for tx in (px(goal * (1.0 - tol)), px(goal * (1.0 + tol))):
+        if chart_x <= tx <= chart_x + chart_w:
+            g.DrawLine(tpen,
+                       drawing.PointF(tx, bar_y),
+                       drawing.PointF(tx, bar_y + bar_h))
+
+    # 7. Right labels: measured/goal and delta %
+    delta = (meas - goal) / goal * 100.0
+    sign  = "+" if delta >= 0 else ""
+    vx    = float(total_w - _CHART_VALUE_W + 4)
+    g.DrawText(font,    c_black,
+               drawing.PointF(vx, bar_y - 1.0),
+               f"{meas:,.1f}/{goal:,.1f}")
+    g.DrawText(sm_font, _rgb(80, 80, 80),
+               drawing.PointF(vx, bar_y + 11.0),
+               f"{sign}{delta:.1f}%  [{unit}]")
+
+
+def _export_chart_png(entries, tol, unit, path, chart_width=900):
+    """Render bullet-chart entries to a PNG file at the given path."""
+    n = max(1, len(entries))
+    height = n * _CHART_ROW_H + 20
+    bmp = drawing.Bitmap(chart_width, height, drawing.PixelFormat.Format32bppRgba)
+    g = drawing.Graphics.Create(bmp)
+    try:
+        g.FillRectangle(drawing.Colors.White,
+                        drawing.RectangleF(0.0, 0.0, float(chart_width), float(height)))
+        for i, entry in enumerate(entries):
+            _draw_bullet_row(g, i, entry, tol, unit, chart_width)
+    finally:
+        g.Dispose()
+    bmp.Save(path)
+    bmp.Dispose()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # UI
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -483,12 +659,26 @@ class LinderoForm(forms.Form):
         self.Title = "Lindero — Footprint Area Calculator"
         self.Padding = drawing.Padding(10)
         self.Resizable = True
-        self.MinimumSize = drawing.Size(640, 620)
+        self.MinimumSize = drawing.Size(480, 540)
+        self.ClientSize  = drawing.Size(680, 720)
         self.Owner = Rhino.UI.RhinoEtoApp.MainWindow
 
-        self.available_keys = get_all_user_text_keys()
+        self.available_keys   = get_all_user_text_keys()
         self.available_layers = all_layer_names()
-        self._export_data = None  # populated after each successful calculation
+
+        # Last-calculation state (for Write Area and Export)
+        self._export_data = None
+        self._last_s1 = None   # list of {guid, name, area}
+        self._last_s2 = None   # {objects, total, union_ok}
+        self._last_s3 = None   # {sublayers, overall_total}
+
+        # S4 / S5 chart state
+        self._s4_entries = []
+        self._s4_tol     = 0.10
+        self._s4_unit    = ""
+        self._s5_entries = []
+        self._s5_tol     = 0.10
+        self._s5_unit    = ""
 
         self._build_ui()
 
@@ -502,17 +692,20 @@ class LinderoForm(forms.Form):
         outer.Spacing = 8
         outer.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
 
-        # Tabs
+        # Tabs — expand to fill available height
         self.tabs = forms.TabControl()
         self.tabs.Pages.Add(self._tab_s1())
         self.tabs.Pages.Add(self._tab_s2())
         self.tabs.Pages.Add(self._tab_s3())
-        outer.Items.Add(forms.StackLayoutItem(self.tabs))
+        self.tabs.Pages.Add(self._tab_s4())
+        self.tabs.Pages.Add(self._tab_s5())
+        self.tabs.Pages.Add(self._tab_settings())
+        outer.Items.Add(forms.StackLayoutItem(self.tabs, True))
 
         # Button row
         btn_row = forms.StackLayout()
         btn_row.Orientation = forms.Orientation.Horizontal
-        btn_row.Spacing = 8
+        btn_row.Spacing = 6
 
         calc_btn = forms.Button()
         calc_btn.Text = "Calculate"
@@ -530,58 +723,108 @@ class LinderoForm(forms.Form):
         export_btn.Text = "Export to Excel"
         export_btn.Click += self.on_export
 
+        write_btn = forms.Button()
+        write_btn.Text = "Write Area to Objects"
+        write_btn.Click += self.on_write_area_toggle
+
+        png_btn = forms.Button()
+        png_btn.Text = "Export Chart as PNG"
+        png_btn.Click += self.on_export_png
+
         btn_row.Items.Add(forms.StackLayoutItem(calc_btn))
         btn_row.Items.Add(forms.StackLayoutItem(clear_btn))
         btn_row.Items.Add(forms.StackLayoutItem(refresh_btn))
         btn_row.Items.Add(forms.StackLayoutItem(export_btn))
+        btn_row.Items.Add(forms.StackLayoutItem(write_btn))
+        btn_row.Items.Add(forms.StackLayoutItem(png_btn))
         outer.Items.Add(forms.StackLayoutItem(btn_row))
 
-        # Results area (expands to fill remaining height)
-        self.results_area = forms.TextArea()
-        self.results_area.ReadOnly = True
-        self.results_area.Font = drawing.Font("Courier New", 9)
-        self.results_area.Text = (
-            "Select a scenario tab, set the parameters, and click Calculate.\n"
-        )
-        outer.Items.Add(forms.StackLayoutItem(self.results_area, True))
+        # Write panel (hidden until toggled)
+        outer.Items.Add(forms.StackLayoutItem(self._build_write_panel()))
 
         # Status label
         self.status_label = forms.Label()
-        self.status_label.Text = f"Ready  —  {len(self.available_layers)} layer(s), {len(self.available_keys)} key(s) loaded."
+        self.status_label.Text = (
+            f"Ready  —  {len(self.available_layers)} layer(s), "
+            f"{len(self.available_keys)} key(s) loaded."
+        )
         self.status_label.TextColor = drawing.Colors.Gray
         outer.Items.Add(forms.StackLayoutItem(self.status_label))
 
         self.Content = outer
 
+    def _build_write_panel(self):
+        self._write_panel = forms.StackLayout()
+        self._write_panel.Orientation = forms.Orientation.Horizontal
+        self._write_panel.Spacing = 6
+        self._write_panel.Padding = drawing.Padding(0, 2, 0, 2)
+        self._write_panel.Visible = False
+
+        wk_lbl = forms.Label()
+        wk_lbl.Text = "Write to Key:"
+
+        self._write_key_combo = forms.ComboBox()
+        self._write_key_combo.DataStore = ["Area"] + list(self.available_keys)
+        self._write_key_combo.Text = "Area"
+        self._write_key_combo.Width = 180
+
+        confirm_btn = forms.Button()
+        confirm_btn.Text = "Confirm Write"
+        confirm_btn.Click += self.on_confirm_write
+
+        cancel_btn = forms.Button()
+        cancel_btn.Text = "Cancel"
+        cancel_btn.Click += self._on_write_cancel
+
+        self._write_panel.Items.Add(forms.StackLayoutItem(wk_lbl))
+        self._write_panel.Items.Add(forms.StackLayoutItem(self._write_key_combo))
+        self._write_panel.Items.Add(forms.StackLayoutItem(confirm_btn))
+        self._write_panel.Items.Add(forms.StackLayoutItem(cancel_btn))
+
+        return self._write_panel
+
+    # ------------------------------------------------------------------
+    # Tab builders — S1 / S2 / S3
+    # ------------------------------------------------------------------
+
     def _tab_s1(self):
         page = forms.TabPage()
         page.Text = "S1 — Selected Objects"
 
-        layout = forms.DynamicLayout()
-        layout.DefaultSpacing = drawing.Size(5, 6)
-        layout.Padding = drawing.Padding(8)
+        controls = forms.DynamicLayout()
+        controls.DefaultSpacing = drawing.Size(5, 6)
+        controls.Padding = drawing.Padding(8)
 
         desc = forms.Label()
         desc.Text = "Individual footprint per selected object. No overlap handling."
         desc.TextColor = drawing.Colors.Gray
-        layout.AddRow(desc)
-        layout.AddRow(None)
+        controls.AddRow(desc)
+        controls.AddRow(None)
 
         name_lbl = forms.Label()
         name_lbl.Text = "Name Key (optional):"
-
         self.name_key_combo = forms.ComboBox()
         self.name_key_combo.DataStore = self.available_keys
         self.name_key_combo.PlaceholderText = "Falls back to object name / GUID"
         self.name_key_combo.Width = 300
-
-        layout.AddRow(name_lbl, self.name_key_combo)
-        layout.AddRow(None)
+        controls.AddRow(name_lbl, self.name_key_combo)
+        controls.AddRow(None)
 
         note = forms.Label()
         note.Text = "Select objects in Rhino (form stays open), then click Calculate."
         note.TextColor = drawing.Colors.Gray
-        layout.AddRow(note)
+        controls.AddRow(note)
+
+        self.results_s1 = forms.TextArea()
+        self.results_s1.ReadOnly = True
+        self.results_s1.Font = drawing.Font("Courier New", 9)
+        self.results_s1.Text = "Select objects and click Calculate.\n"
+
+        layout = forms.StackLayout()
+        layout.Orientation = forms.Orientation.Vertical
+        layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        layout.Items.Add(forms.StackLayoutItem(controls))
+        layout.Items.Add(forms.StackLayoutItem(self.results_s1, True))
 
         page.Content = layout
         return page
@@ -590,34 +833,41 @@ class LinderoForm(forms.Form):
         page = forms.TabPage()
         page.Text = "S2 — By Layer"
 
-        layout = forms.DynamicLayout()
-        layout.DefaultSpacing = drawing.Size(5, 6)
-        layout.Padding = drawing.Padding(8)
+        controls = forms.DynamicLayout()
+        controls.DefaultSpacing = drawing.Size(5, 6)
+        controls.Padding = drawing.Padding(8)
 
         desc = forms.Label()
         desc.Text = "All objects on a layer. Overlapping footprints merged (Boolean Union)."
         desc.TextColor = drawing.Colors.Gray
-        layout.AddRow(desc)
-        layout.AddRow(None)
+        controls.AddRow(desc)
+        controls.AddRow(None)
 
         layer_lbl = forms.Label()
         layer_lbl.Text = "Layer:"
-
         self.layer_s2_dd = forms.DropDown()
         self._populate_layer_dd(self.layer_s2_dd)
         self.layer_s2_dd.Width = 300
-
-        layout.AddRow(layer_lbl, self.layer_s2_dd)
+        controls.AddRow(layer_lbl, self.layer_s2_dd)
 
         obj_key_lbl = forms.Label()
         obj_key_lbl.Text = "Object Key:"
-
         self.obj_key_s2 = forms.ComboBox()
         self.obj_key_s2.DataStore = self.available_keys
         self.obj_key_s2.PlaceholderText = "User text key for object labels"
         self.obj_key_s2.Width = 300
+        controls.AddRow(obj_key_lbl, self.obj_key_s2)
 
-        layout.AddRow(obj_key_lbl, self.obj_key_s2)
+        self.results_s2 = forms.TextArea()
+        self.results_s2.ReadOnly = True
+        self.results_s2.Font = drawing.Font("Courier New", 9)
+        self.results_s2.Text = "Select a layer and click Calculate.\n"
+
+        layout = forms.StackLayout()
+        layout.Orientation = forms.Orientation.Vertical
+        layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        layout.Items.Add(forms.StackLayoutItem(controls))
+        layout.Items.Add(forms.StackLayoutItem(self.results_s2, True))
 
         page.Content = layout
         return page
@@ -626,56 +876,245 @@ class LinderoForm(forms.Form):
         page = forms.TabPage()
         page.Text = "S3 — Layer Hierarchy"
 
-        layout = forms.DynamicLayout()
-        layout.DefaultSpacing = drawing.Size(5, 6)
-        layout.Padding = drawing.Padding(8)
+        controls = forms.DynamicLayout()
+        controls.DefaultSpacing = drawing.Size(5, 6)
+        controls.Padding = drawing.Padding(8)
 
         desc = forms.Label()
         desc.Text = "Parent layer + sublayers (each sublayer = one level / floor)."
         desc.TextColor = drawing.Colors.Gray
-        layout.AddRow(desc)
-        layout.AddRow(None)
+        controls.AddRow(desc)
+        controls.AddRow(None)
 
         parent_lbl = forms.Label()
         parent_lbl.Text = "Parent Layer:"
-
         self.parent_layer_dd = forms.DropDown()
         self._populate_layer_dd(self.parent_layer_dd)
         self.parent_layer_dd.Width = 300
-
-        layout.AddRow(parent_lbl, self.parent_layer_dd)
-        layout.AddRow(None)
+        controls.AddRow(parent_lbl, self.parent_layer_dd)
+        controls.AddRow(None)
 
         obj_key_lbl = forms.Label()
         obj_key_lbl.Text = "Object Key:"
-
         self.obj_key_s3 = forms.ComboBox()
         self.obj_key_s3.DataStore = self.available_keys
         self.obj_key_s3.PlaceholderText = "Individual / small group name"
         self.obj_key_s3.Width = 300
-
         obj_key_hint = forms.Label()
         obj_key_hint.Text = "Individual or small group name (e.g. 'Room Name')"
         obj_key_hint.TextColor = drawing.Colors.Gray
-
-        layout.AddRow(obj_key_lbl, self.obj_key_s3)
-        layout.AddRow(None, obj_key_hint)
-        layout.AddRow(None)
+        controls.AddRow(obj_key_lbl, self.obj_key_s3)
+        controls.AddRow(None, obj_key_hint)
+        controls.AddRow(None)
 
         grp_key_lbl = forms.Label()
         grp_key_lbl.Text = "Group Key:"
-
         self.grp_key_s3 = forms.ComboBox()
         self.grp_key_s3.DataStore = self.available_keys
         self.grp_key_s3.PlaceholderText = "Department / class (larger grouping)"
         self.grp_key_s3.Width = 300
-
         grp_key_hint = forms.Label()
         grp_key_hint.Text = "Larger class grouping (e.g. 'Department')"
         grp_key_hint.TextColor = drawing.Colors.Gray
+        controls.AddRow(grp_key_lbl, self.grp_key_s3)
+        controls.AddRow(None, grp_key_hint)
 
-        layout.AddRow(grp_key_lbl, self.grp_key_s3)
-        layout.AddRow(None, grp_key_hint)
+        self.results_s3 = forms.TextArea()
+        self.results_s3.ReadOnly = True
+        self.results_s3.Font = drawing.Font("Courier New", 9)
+        self.results_s3.Text = "Select a parent layer and click Calculate.\n"
+
+        layout = forms.StackLayout()
+        layout.Orientation = forms.Orientation.Vertical
+        layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        layout.Items.Add(forms.StackLayoutItem(controls))
+        layout.Items.Add(forms.StackLayoutItem(self.results_s3, True))
+
+        page.Content = layout
+        return page
+
+    # ------------------------------------------------------------------
+    # Tab builders — S4 / S5
+    # ------------------------------------------------------------------
+
+    def _tab_s4(self):
+        page = forms.TabPage()
+        page.Text = "S4 — Room Analysis"
+
+        layout = forms.StackLayout()
+        layout.Orientation = forms.Orientation.Vertical
+        layout.Spacing = 4
+        layout.Padding = drawing.Padding(8)
+        layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+
+        desc = forms.Label()
+        desc.Text = (
+            "Aggregates individual object areas by Object Key (S3) across all "
+            "floors of the S3 Parent Layer. Compares totals to Room Target Key "
+            "(set in Settings). Uses S3 tolerance setting."
+        )
+        desc.TextColor = drawing.Colors.Gray
+        desc.Wrap = forms.WrapMode.Word
+
+        self.warn_s4 = forms.Label()
+        self.warn_s4.TextColor = drawing.Color(0.6, 0.1, 0.1)
+        self.warn_s4.Wrap = forms.WrapMode.Word
+        self.warn_s4.Visible = False
+
+        self.chart_s4 = forms.Drawable()
+        self.chart_s4.Size = drawing.Size(400, 10)
+        self.chart_s4.Paint += self._paint_s4
+
+        scroll_s4 = forms.Scrollable()
+        scroll_s4.ExpandContentWidth = True
+        scroll_s4.ExpandContentHeight = False
+        scroll_s4.Content = self.chart_s4
+
+        layout.Items.Add(forms.StackLayoutItem(desc))
+        layout.Items.Add(forms.StackLayoutItem(self.warn_s4))
+        layout.Items.Add(forms.StackLayoutItem(scroll_s4, True))
+
+        page.Content = layout
+        return page
+
+    def _tab_s5(self):
+        page = forms.TabPage()
+        page.Text = "S5 — Group Analysis"
+
+        layout = forms.StackLayout()
+        layout.Orientation = forms.Orientation.Vertical
+        layout.Spacing = 4
+        layout.Padding = drawing.Padding(8)
+        layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+
+        desc = forms.Label()
+        desc.Text = (
+            "Aggregates individual object areas by Group Key (S3) across all "
+            "floors of the S3 Parent Layer. Compares totals to Group Target Key "
+            "(set in Settings). Uses S3 tolerance setting."
+        )
+        desc.TextColor = drawing.Colors.Gray
+        desc.Wrap = forms.WrapMode.Word
+
+        self.warn_s5 = forms.Label()
+        self.warn_s5.TextColor = drawing.Color(0.6, 0.1, 0.1)
+        self.warn_s5.Wrap = forms.WrapMode.Word
+        self.warn_s5.Visible = False
+
+        self.chart_s5 = forms.Drawable()
+        self.chart_s5.Size = drawing.Size(400, 10)
+        self.chart_s5.Paint += self._paint_s5
+
+        scroll_s5 = forms.Scrollable()
+        scroll_s5.ExpandContentWidth = True
+        scroll_s5.ExpandContentHeight = False
+        scroll_s5.Content = self.chart_s5
+
+        layout.Items.Add(forms.StackLayoutItem(desc))
+        layout.Items.Add(forms.StackLayoutItem(self.warn_s5))
+        layout.Items.Add(forms.StackLayoutItem(scroll_s5, True))
+
+        page.Content = layout
+        return page
+
+    # ------------------------------------------------------------------
+    # Tab builder — Settings
+    # ------------------------------------------------------------------
+
+    def _tab_settings(self):
+        page = forms.TabPage()
+        page.Text = "Settings"
+
+        layout = forms.DynamicLayout()
+        layout.DefaultSpacing = drawing.Size(5, 8)
+        layout.Padding = drawing.Padding(12)
+
+        # ── Program Key Mapping ──────────────────────────────────────
+        sec1 = forms.Label()
+        sec1.Text = "Program Key Mapping"
+        sec1.Font = drawing.Font("Arial", 9, drawing.FontStyle.Bold)
+        layout.AddRow(sec1)
+        layout.AddRow(None)
+
+        rtk_lbl = forms.Label()
+        rtk_lbl.Text = "Room Target Key:"
+        self.room_target_key_dd = forms.ComboBox()
+        self.room_target_key_dd.DataStore = self.available_keys
+        self.room_target_key_dd.PlaceholderText = "Key holding target area per room"
+        self.room_target_key_dd.Width = 280
+        rtk_hint = forms.Label()
+        rtk_hint.Text = "Key containing the target area per room type"
+        rtk_hint.TextColor = drawing.Colors.Gray
+        layout.AddRow(rtk_lbl, self.room_target_key_dd)
+        layout.AddRow(None, rtk_hint)
+        layout.AddRow(None)
+
+        gtk_lbl = forms.Label()
+        gtk_lbl.Text = "Group Target Key:"
+        self.grp_target_key_dd = forms.ComboBox()
+        self.grp_target_key_dd.DataStore = self.available_keys
+        self.grp_target_key_dd.PlaceholderText = "Key holding target area per group"
+        self.grp_target_key_dd.Width = 280
+        gtk_hint = forms.Label()
+        gtk_hint.Text = "Key containing the target area per group"
+        gtk_hint.TextColor = drawing.Colors.Gray
+        layout.AddRow(gtk_lbl, self.grp_target_key_dd)
+        layout.AddRow(None, gtk_hint)
+        layout.AddRow(None)
+
+        # ── Tolerance ────────────────────────────────────────────────
+        sep1 = forms.Label()
+        sep1.Text = "─" * 42
+        sep1.TextColor = drawing.Colors.Gray
+        layout.AddRow(sep1)
+
+        sec2 = forms.Label()
+        sec2.Text = "Tolerance"
+        sec2.Font = drawing.Font("Arial", 9, drawing.FontStyle.Bold)
+        layout.AddRow(sec2)
+        layout.AddRow(None)
+
+        tol_lbl = forms.Label()
+        tol_lbl.Text = "Global Tolerance (%):"
+        self.tolerance_stepper = forms.NumericStepper()
+        self.tolerance_stepper.MinValue    = 0.0
+        self.tolerance_stepper.MaxValue    = 50.0
+        self.tolerance_stepper.Value       = 10.0
+        self.tolerance_stepper.DecimalPlaces = 1
+        self.tolerance_stepper.Increment   = 0.5
+        self.tolerance_stepper.Width       = 80
+        tol_hint = forms.Label()
+        tol_hint.Text = "Symmetric tolerance applied in S4 and S5 bullet charts"
+        tol_hint.TextColor = drawing.Colors.Gray
+        layout.AddRow(tol_lbl, self.tolerance_stepper)
+        layout.AddRow(None, tol_hint)
+        layout.AddRow(None)
+
+        # ── Configuration ────────────────────────────────────────────
+        sep2 = forms.Label()
+        sep2.Text = "─" * 42
+        sep2.TextColor = drawing.Colors.Gray
+        layout.AddRow(sep2)
+
+        sec3 = forms.Label()
+        sec3.Text = "Configuration"
+        sec3.Font = drawing.Font("Arial", 9, drawing.FontStyle.Bold)
+        layout.AddRow(sec3)
+        layout.AddRow(None)
+
+        save_btn = forms.Button()
+        save_btn.Text = "Save Config"
+        save_btn.Click += self.on_save_config
+
+        load_btn = forms.Button()
+        load_btn.Text = "Load Config"
+        load_btn.Click += self.on_load_config
+
+        cfg_hint = forms.Label()
+        cfg_hint.Text = 'Saves / loads key mapping and tolerance to "lindero_config.json"'
+        cfg_hint.TextColor = drawing.Colors.Gray
+        layout.AddRow(save_btn, load_btn)
+        layout.AddRow(None, cfg_hint)
 
         page.Content = layout
         return page
@@ -692,41 +1131,43 @@ class LinderoForm(forms.Form):
             dd.SelectedIndex = 0
 
     def _selected_layer(self, dd):
-        """Return the layer name corresponding to the current DropDown selection."""
         idx = dd.SelectedIndex
         if idx < 0 or idx >= len(self.available_layers):
             return None
         return self.available_layers[idx]
 
     def _restore_layer_dd(self, dd, prev_name):
-        """Repopulate a layer DropDown, restoring the previous selection by name."""
         self._populate_layer_dd(dd)
         if prev_name and prev_name in self.available_layers:
             dd.SelectedIndex = self.available_layers.index(prev_name)
 
     # ------------------------------------------------------------------
-    # Event handlers
+    # Event handlers — model / navigation
     # ------------------------------------------------------------------
 
     def on_refresh_model(self, _sender, _e):
-        prev_s2 = self._selected_layer(self.layer_s2_dd)
+        prev_s2     = self._selected_layer(self.layer_s2_dd)
         prev_parent = self._selected_layer(self.parent_layer_dd)
 
-        self.available_keys = get_all_user_text_keys()
+        self.available_keys   = get_all_user_text_keys()
         self.available_layers = all_layer_names()
 
-        # Restore key combos (preserve typed text)
-        for combo in [self.name_key_combo, self.obj_key_s2, self.obj_key_s3, self.grp_key_s3]:
+        for combo in [self.name_key_combo, self.obj_key_s2, self.obj_key_s3,
+                      self.grp_key_s3, self.room_target_key_dd, self.grp_target_key_dd]:
             txt = combo.Text
             combo.DataStore = self.available_keys
             combo.Text = txt
 
-        # Restore layer dropdowns
-        self._restore_layer_dd(self.layer_s2_dd, prev_s2)
+        self._restore_layer_dd(self.layer_s2_dd,     prev_s2)
         self._restore_layer_dd(self.parent_layer_dd, prev_parent)
 
+        prev_wk = self._write_key_combo.Text
+        self._write_key_combo.DataStore = ["Area"] + list(self.available_keys)
+        self._write_key_combo.Text = prev_wk or "Area"
+
         self.status_label.Text = (
-            f"Refreshed  —  {len(self.available_layers)} layer(s), {len(self.available_keys)} key(s)."
+            f"Refreshed  —  {len(self.available_layers)} layer(s), "
+            f"{len(self.available_keys)} key(s)."
         )
         self.status_label.TextColor = drawing.Colors.Gray
 
@@ -734,24 +1175,45 @@ class LinderoForm(forms.Form):
         unit = unit_label()
         try:
             idx = self.tabs.SelectedIndex
-            if idx == 0:
-                self._run_s1(unit)
-            elif idx == 1:
-                self._run_s2(unit)
+            runners = {
+                0: self._run_s1,
+                1: self._run_s2,
+                2: self._run_s3,
+                3: self._run_s4,
+                4: self._run_s5,
+            }
+            fn = runners.get(idx)
+            if fn:
+                fn(unit)
             else:
-                self._run_s3(unit)
+                self.status_label.Text = "Switch to a calculation tab (S1–S5) to calculate."
+                self.status_label.TextColor = drawing.Colors.Gray
         except Exception as ex:
             self.status_label.Text = f"Error: {ex}"
             self.status_label.TextColor = drawing.Colors.Red
 
     def on_clear(self, _sender, _e):
-        self.results_area.Text = ""
+        idx = self.tabs.SelectedIndex
+        if idx == 0:
+            self.results_s1.Text = ""
+        elif idx == 1:
+            self.results_s2.Text = ""
+        elif idx == 2:
+            self.results_s3.Text = ""
+        elif idx == 3:
+            self._s4_entries = []
+            self.warn_s4.Visible = False
+            self.chart_s4.Invalidate()
+        elif idx == 4:
+            self._s5_entries = []
+            self.warn_s5.Visible = False
+            self.chart_s5.Invalidate()
         self.status_label.Text = "Cleared."
         self.status_label.TextColor = drawing.Colors.Gray
 
     def on_export(self, _sender, _e):
         if self._export_data is None:
-            self.status_label.Text = "Nothing to export — run Calculate first."
+            self.status_label.Text = "Nothing to export — run Calculate on S1, S2, or S3 first."
             self.status_label.TextColor = drawing.Colors.Orange
             return
 
@@ -773,21 +1235,154 @@ class LinderoForm(forms.Form):
             self.status_label.Text = f"Export failed: {ex}"
             self.status_label.TextColor = drawing.Colors.Red
 
+    def on_export_png(self, _sender, _e):
+        idx = self.tabs.SelectedIndex
+        if idx == 3:
+            entries, tol, unit = self._s4_entries, self._s4_tol, self._s4_unit
+            default_name = "Lindero_S4_RoomAnalysis"
+        elif idx == 4:
+            entries, tol, unit = self._s5_entries, self._s5_tol, self._s5_unit
+            default_name = "Lindero_S5_GroupAnalysis"
+        else:
+            self.status_label.Text = "Switch to S4 or S5 tab to export a chart as PNG."
+            self.status_label.TextColor = drawing.Colors.Orange
+            return
+
+        if not entries:
+            self.status_label.Text = "No chart data — run Calculate first."
+            self.status_label.TextColor = drawing.Colors.Orange
+            return
+
+        path = rs.SaveFileName(
+            "Export Chart as PNG",
+            "PNG Images (*.png)|*.png||",
+            None, default_name, "png"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+
+        try:
+            _export_chart_png(entries, tol, unit, path)
+            self.status_label.Text = f"Chart exported → {path}"
+            self.status_label.TextColor = drawing.Colors.Green
+        except Exception as ex:
+            self.status_label.Text = f"PNG export failed: {ex}"
+            self.status_label.TextColor = drawing.Colors.Red
+
     # ------------------------------------------------------------------
-    # Per-scenario runners
+    # Event handlers — Write Area
+    # ------------------------------------------------------------------
+
+    def on_write_area_toggle(self, _s, _e):
+        self._write_panel.Visible = not self._write_panel.Visible
+
+    def _on_write_cancel(self, _s, _e):
+        self._write_panel.Visible = False
+
+    def on_confirm_write(self, _s, _e):
+        key = self._write_key_combo.Text.strip()
+        if not key:
+            self.status_label.Text = "Enter a key name to write to."
+            self.status_label.TextColor = drawing.Colors.Red
+            return
+
+        idx = self.tabs.SelectedIndex
+        objects = []
+        if idx == 0 and self._last_s1:
+            objects = self._last_s1
+        elif idx == 1 and self._last_s2:
+            objects = self._last_s2["objects"]
+        elif idx == 2 and self._last_s3:
+            for sl_data in self._last_s3["sublayers"].values():
+                objects += sl_data["objects"]
+
+        if not objects:
+            self.status_label.Text = "No calculated data — run Calculate first on S1, S2, or S3."
+            self.status_label.TextColor = drawing.Colors.Orange
+            return
+
+        count = 0
+        for obj in objects:
+            try:
+                guid   = System.Guid(obj["guid"])
+                rh_obj = sc.doc.Objects.FindId(guid)
+                if rh_obj:
+                    rh_obj.Attributes.SetUserString(key, f"{obj['area']:.4f}")
+                    rh_obj.CommitChanges()
+                    count += 1
+            except Exception:
+                pass
+
+        sc.doc.Views.Redraw()
+        self._write_panel.Visible = False
+        self.status_label.Text = f"Area written to {count} object(s) using key '{key}'"
+        self.status_label.TextColor = drawing.Colors.Green
+
+    # ------------------------------------------------------------------
+    # Event handlers — Settings config
+    # ------------------------------------------------------------------
+
+    def on_save_config(self, _s, _e):
+        path = rs.SaveFileName(
+            "Save Lindero Configuration",
+            "JSON Files (*.json)|*.json||",
+            None, "lindero_config", "json"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        cfg = {
+            "room_target_key":   self.room_target_key_dd.Text.strip(),
+            "group_target_key":  self.grp_target_key_dd.Text.strip(),
+            "tolerance_percent": self.tolerance_stepper.Value,
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+            self.status_label.Text = f"Config saved → {path}"
+            self.status_label.TextColor = drawing.Colors.Green
+        except Exception as ex:
+            self.status_label.Text = f"Save failed: {ex}"
+            self.status_label.TextColor = drawing.Colors.Red
+
+    def on_load_config(self, _s, _e):
+        path = rs.OpenFileName(
+            "Load Lindero Configuration",
+            "JSON Files (*.json)|*.json||"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            self.room_target_key_dd.Text   = cfg.get("room_target_key", "")
+            self.grp_target_key_dd.Text    = cfg.get("group_target_key", "")
+            self.tolerance_stepper.Value   = float(cfg.get("tolerance_percent", 10.0))
+            self.status_label.Text = f"Config loaded ← {path}"
+            self.status_label.TextColor = drawing.Colors.Green
+        except Exception as ex:
+            self.status_label.Text = f"Load failed: {ex}"
+            self.status_label.TextColor = drawing.Colors.Red
+
+    # ------------------------------------------------------------------
+    # Per-scenario runners — S1 / S2 / S3
     # ------------------------------------------------------------------
 
     def _run_s1(self, unit):
         name_key = self.name_key_combo.Text.strip()
-        results = calc_s1(name_key)
+        results  = calc_s1(name_key)
 
         if not results:
-            self.results_area.Text = "  No objects are currently selected in Rhino.\n"
+            self.results_s1.Text = "  No objects are currently selected in Rhino.\n"
             self.status_label.Text = "No selection."
             self.status_label.TextColor = drawing.Colors.Orange
             return
 
-        self.results_area.Text = format_s1(results, unit)
+        self.results_s1.Text = format_s1(results, unit)
+        self._last_s1 = results
         total = sum(r["area"] for r in results)
         self._export_data = {
             "scenario": 1, "unit": unit,
@@ -807,15 +1402,16 @@ class LinderoForm(forms.Form):
             return
 
         obj_key = self.obj_key_s2.Text.strip()
-        data = calc_s2(layer_name, obj_key)
+        data    = calc_s2(layer_name, obj_key)
 
         if not data["objects"]:
-            self.results_area.Text = f"  No objects found on layer '{layer_name}'.\n"
+            self.results_s2.Text = f"  No objects found on layer '{layer_name}'.\n"
             self.status_label.Text = f"Layer '{short_name(layer_name)}' is empty."
             self.status_label.TextColor = drawing.Colors.Orange
             return
 
-        self.results_area.Text = format_s2(data, layer_name, obj_key, unit)
+        self.results_s2.Text = format_s2(data, layer_name, obj_key, unit)
+        self._last_s2 = data
         self._export_data = {
             "scenario": 2, "unit": unit,
             "params": {"layer_name": layer_name, "obj_key": obj_key},
@@ -836,18 +1432,17 @@ class LinderoForm(forms.Form):
 
         obj_key = self.obj_key_s3.Text.strip()
         grp_key = self.grp_key_s3.Text.strip()
-        data = calc_s3(parent, obj_key, grp_key)
+        data    = calc_s3(parent, obj_key, grp_key)
 
         non_empty = [sl for sl, d in data["sublayers"].items() if d["objects"]]
         if not non_empty:
-            self.results_area.Text = (
-                f"  No objects found in any sublayer of '{parent}'.\n"
-            )
+            self.results_s3.Text = f"  No objects found in any sublayer of '{parent}'.\n"
             self.status_label.Text = "No objects found in sublayers."
             self.status_label.TextColor = drawing.Colors.Orange
             return
 
-        self.results_area.Text = format_s3(data, parent, obj_key, grp_key, unit)
+        self.results_s3.Text = format_s3(data, parent, obj_key, grp_key, unit)
+        self._last_s3 = data
         self._export_data = {
             "scenario": 3, "unit": unit,
             "params": {"parent": parent, "obj_key": obj_key, "grp_key": grp_key},
@@ -860,6 +1455,120 @@ class LinderoForm(forms.Form):
             f"Overall total: {data['overall_total']:,.4f} {unit}"
         )
         self.status_label.TextColor = drawing.Colors.Green
+
+    # ------------------------------------------------------------------
+    # Per-scenario runners — S4 / S5
+    # ------------------------------------------------------------------
+
+    def _run_s4(self, unit):
+        parent = self._selected_layer(self.parent_layer_dd)
+        if not parent:
+            self.status_label.Text = "S4 uses S3 Parent Layer — please select one on the S3 tab."
+            self.status_label.TextColor = drawing.Colors.Red
+            return
+
+        obj_key = self.obj_key_s3.Text.strip()
+        if not obj_key:
+            self.status_label.Text = "S4 uses S3 Object Key — please set one on the S3 tab."
+            self.status_label.TextColor = drawing.Colors.Orange
+            return
+
+        room_target_key = self.room_target_key_dd.Text.strip()
+        tol  = self.tolerance_stepper.Value / 100.0
+        data = calc_s4(parent, obj_key, room_target_key)
+
+        if not data["entries"]:
+            self.status_label.Text = "No objects found — check S3 Parent Layer setting."
+            self.status_label.TextColor = drawing.Colors.Orange
+            return
+
+        self._s4_entries = data["entries"]
+        self._s4_tol     = tol
+        self._s4_unit    = unit
+        n = len(data["entries"])
+        self.chart_s4.Size = drawing.Size(
+            max(400, self.chart_s4.Width),
+            max(10, n * _CHART_ROW_H + 20)
+        )
+        self.chart_s4.Invalidate()
+
+        if data["warnings"]:
+            self.warn_s4.Text    = "\n".join(data["warnings"])
+            self.warn_s4.Visible = True
+        else:
+            self.warn_s4.Visible = False
+
+        n_warn = len(data["warnings"])
+        self.status_label.Text = (
+            f"S4  —  {n} room type(s)  |  Tolerance: {tol*100:.1f}%"
+            + (f"  |  {n_warn} warning(s)" if n_warn else "")
+        )
+        self.status_label.TextColor = (
+            drawing.Colors.Orange if n_warn else drawing.Colors.Green
+        )
+
+    def _run_s5(self, unit):
+        parent = self._selected_layer(self.parent_layer_dd)
+        if not parent:
+            self.status_label.Text = "S5 uses S3 Parent Layer — please select one on the S3 tab."
+            self.status_label.TextColor = drawing.Colors.Red
+            return
+
+        grp_key = self.grp_key_s3.Text.strip()
+        if not grp_key:
+            self.status_label.Text = "S5 uses S3 Group Key — please set one on the S3 tab."
+            self.status_label.TextColor = drawing.Colors.Orange
+            return
+
+        grp_target_key = self.grp_target_key_dd.Text.strip()
+        tol  = self.tolerance_stepper.Value / 100.0
+        data = calc_s5(parent, grp_key, grp_target_key)
+
+        if not data["entries"]:
+            self.status_label.Text = "No objects found — check S3 Parent Layer setting."
+            self.status_label.TextColor = drawing.Colors.Orange
+            return
+
+        self._s5_entries = data["entries"]
+        self._s5_tol     = tol
+        self._s5_unit    = unit
+        n = len(data["entries"])
+        self.chart_s5.Size = drawing.Size(
+            max(400, self.chart_s5.Width),
+            max(10, n * _CHART_ROW_H + 20)
+        )
+        self.chart_s5.Invalidate()
+
+        if data["warnings"]:
+            self.warn_s5.Text    = "\n".join(data["warnings"])
+            self.warn_s5.Visible = True
+        else:
+            self.warn_s5.Visible = False
+
+        n_warn = len(data["warnings"])
+        self.status_label.Text = (
+            f"S5  —  {n} group(s)  |  Tolerance: {tol*100:.1f}%"
+            + (f"  |  {n_warn} warning(s)" if n_warn else "")
+        )
+        self.status_label.TextColor = (
+            drawing.Colors.Orange if n_warn else drawing.Colors.Green
+        )
+
+    # ------------------------------------------------------------------
+    # Bullet chart paint handlers
+    # ------------------------------------------------------------------
+
+    def _paint_s4(self, sender, e):
+        g = e.Graphics
+        w = sender.Width
+        for i, entry in enumerate(self._s4_entries):
+            _draw_bullet_row(g, i, entry, self._s4_tol, self._s4_unit, w)
+
+    def _paint_s5(self, sender, e):
+        g = e.Graphics
+        w = sender.Width
+        for i, entry in enumerate(self._s5_entries):
+            _draw_bullet_row(g, i, entry, self._s5_tol, self._s5_unit, w)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -888,14 +1597,14 @@ def _hdr(ws, row, cols):
     """Write a styled header row. Returns the row index + 1."""
     for ci, text in enumerate(cols, 1):
         c = ws.cell(row=row, column=ci, value=text)
-        c.font  = _HDR_FONT
-        c.fill  = _HDR_FILL
+        c.font      = _HDR_FONT
+        c.fill      = _HDR_FILL
         c.alignment = _HDR_ALIGN
     return row + 1
 
 
 def _sec(ws, row, text, n_cols=2):
-    """Write a section-label row (sublayer / table title)."""
+    """Write a section-label row."""
     c = ws.cell(row=row, column=1, value=text)
     c.font = _SEC_FONT
     c.fill = _SEC_FILL
@@ -910,14 +1619,14 @@ def _tot(ws, row, label, value):
     lc.font = _TOT_FONT
     lc.fill = _TOT_FILL
     vc = ws.cell(row=row, column=2, value=value)
-    vc.font = _TOT_FONT
-    vc.fill = _TOT_FILL
+    vc.font          = _TOT_FONT
+    vc.fill          = _TOT_FILL
     vc.number_format = _AREA_FMT
     return row + 1
 
 
 def _warn(ws, row, label, value=None, n_cols=2):
-    """Write an amber-highlighted warning row. Value (float) goes in column 2."""
+    """Write an amber-highlighted warning row."""
     lc = ws.cell(row=row, column=1, value=label)
     lc.font = _WARN_FONT
     lc.fill = _WARN_FILL
@@ -925,8 +1634,8 @@ def _warn(ws, row, label, value=None, n_cols=2):
         ws.cell(row=row, column=ci).fill = _WARN_FILL
     if value is not None:
         vc = ws.cell(row=row, column=2, value=value)
-        vc.font = _WARN_FONT
-        vc.fill = _WARN_FILL
+        vc.font          = _WARN_FONT
+        vc.fill          = _WARN_FILL
         vc.number_format = _AREA_FMT
     return row + 1
 
@@ -941,7 +1650,6 @@ def _col_widths(ws, widths):
 def _xl_s1(wb, data, unit):
     name_col = data["params"]["name_key"] or "Object Name"
 
-    # Objects sheet
     ws = wb.create_sheet("Objects")
     _col_widths(ws, [38, 32, 20])
     row = _hdr(ws, 1, ["GUID", name_col, f"Footprint Area ({unit})"])
@@ -951,14 +1659,13 @@ def _xl_s1(wb, data, unit):
         ws.cell(row, 3, obj["area"]).number_format = _AREA_FMT
         row += 1
 
-    # Summary sheet
     ws2 = wb.create_sheet("Summary")
     _col_widths(ws2, [36, 22])
     row = _hdr(ws2, 1, ["S1 — Selected Objects", f"[{unit}]"])
     pairs = [
-        ("Name Key used",          data["params"]["name_key"] or "(object name / GUID)"),
-        ("Object count",           len(data["objects"])),
-        ("Total footprint area",   sum(o["area"] for o in data["objects"])),
+        ("Name Key used",        data["params"]["name_key"] or "(object name / GUID)"),
+        ("Object count",         len(data["objects"])),
+        ("Total footprint area", sum(o["area"] for o in data["objects"])),
     ]
     for label, value in pairs:
         lc = ws2.cell(row, 1, label)
@@ -970,11 +1677,10 @@ def _xl_s1(wb, data, unit):
 
 
 def _xl_s2(wb, data, unit):
-    obj_col   = data["params"]["obj_key"] or "Object Name"
-    layer     = data["params"]["layer_name"]
-    raw_sum   = sum(o["area"] for o in data["objects"])
+    obj_col = data["params"]["obj_key"] or "Object Name"
+    layer   = data["params"]["layer_name"]
+    raw_sum = sum(o["area"] for o in data["objects"])
 
-    # Objects sheet
     ws = wb.create_sheet("Objects")
     _col_widths(ws, [38, 30, 32, 20])
     row = _hdr(ws, 1, ["GUID", "Layer", obj_col, f"Footprint Area ({unit})"])
@@ -985,7 +1691,6 @@ def _xl_s2(wb, data, unit):
         ws.cell(row, 4, obj["area"]).number_format = _AREA_FMT
         row += 1
 
-    # Summary sheet
     ws2 = wb.create_sheet("Summary")
     _col_widths(ws2, [38, 22])
     row = _hdr(ws2, 1, ["S2 — By Layer", f"[{unit}]"])
@@ -1014,13 +1719,12 @@ def _xl_s2(wb, data, unit):
 
 
 def _xl_s3(wb, data, unit):
-    params    = data["params"]
-    obj_col   = params["obj_key"] or "Object Name"
-    grp_col   = params["grp_key"] or "Group"
-    parent    = params["parent"]
-    has_grp   = bool(params["grp_key"])
+    params  = data["params"]
+    obj_col = params["obj_key"] or "Object Name"
+    grp_col = params["grp_key"] or "Group"
+    parent  = params["parent"]
+    has_grp = bool(params["grp_key"])
 
-    # Objects sheet — one row per object, all levels flat
     ws = wb.create_sheet("Objects")
     _col_widths(ws, [38, 28, 28, 30, 28, 20])
     row = _hdr(ws, 1, ["GUID", "Parent Layer", "Level", obj_col, grp_col, f"Footprint Area ({unit})"])
@@ -1035,26 +1739,23 @@ def _xl_s3(wb, data, unit):
             ws.cell(row, 6, obj["area"]).number_format = _AREA_FMT
             row += 1
 
-    # Summary sheet
     ws2 = wb.create_sheet("Summary")
     _col_widths(ws2, [30, 28, 22])
     row = _hdr(ws2, 1, ["S3 — Layer Hierarchy", "", f"[{unit}]"])
 
-    # Parameters block
     for label, value in [
-        ("Parent Layer",  parent),
-        ("Object Key",    params["obj_key"] or "(object name / GUID)"),
-        ("Group Key",     params["grp_key"] or "—"),
+        ("Parent Layer", parent),
+        ("Object Key",   params["obj_key"] or "(object name / GUID)"),
+        ("Group Key",    params["grp_key"] or "—"),
     ]:
         ws2.cell(row, 1, label).font = Font(bold=True)
         ws2.cell(row, 2, value)
         row += 1
-    row += 1  # blank separator
+    row += 1
 
-    # By-level table
     row = _sec(ws2, row, "Combined Footprint by Level", n_cols=2)
-    ws2.cell(row, 1, "Level").font      = Font(bold=True)
-    ws2.cell(row, 2, f"Area ({unit})").font = Font(bold=True)
+    ws2.cell(row, 1, "Level").font           = Font(bold=True)
+    ws2.cell(row, 2, f"Area ({unit})").font  = Font(bold=True)
     row += 1
     for sl, sl_data in data["sublayers"].items():
         note = "" if sl_data["union_ok"] else " [union failed]"
@@ -1062,13 +1763,12 @@ def _xl_s3(wb, data, unit):
         ws2.cell(row, 2, sl_data["total"]).number_format = _AREA_FMT
         row += 1
     row = _tot(ws2, row, "Grand Total", data["overall_total"])
-    row += 1  # blank separator
+    row += 1
 
-    # By-group table (only if a group key was specified)
     if has_grp:
         row = _sec(ws2, row, f"Combined Footprint by Level and {grp_col}", n_cols=3)
-        ws2.cell(row, 1, "Level").font        = Font(bold=True)
-        ws2.cell(row, 2, grp_col).font        = Font(bold=True)
+        ws2.cell(row, 1, "Level").font          = Font(bold=True)
+        ws2.cell(row, 2, grp_col).font          = Font(bold=True)
         ws2.cell(row, 3, f"Area ({unit})").font = Font(bold=True)
         row += 1
         for sl, sl_data in data["sublayers"].items():
@@ -1079,13 +1779,12 @@ def _xl_s3(wb, data, unit):
                 ws2.cell(row, 3, ga).number_format = _AREA_FMT
                 row += 1
 
-    # Overlap warnings (one row per level that has overlapping objects)
     levels_with_overlap = []
     for sl, sl_data in data["sublayers"].items():
         individual_sum = sum(o["area"] for o in sl_data["objects"])
-        total_overlap = individual_sum - sl_data["total"]
+        total_overlap  = individual_sum - sl_data["total"]
         if total_overlap > 1e-6:
-            group_sum = sum(sl_data["group_totals"].values()) if sl_data["group_totals"] else individual_sum
+            group_sum   = sum(sl_data["group_totals"].values()) if sl_data["group_totals"] else individual_sum
             cross_group = group_sum - sl_data["total"]
             levels_with_overlap.append((short_name(sl), total_overlap, cross_group))
 
@@ -1093,8 +1792,8 @@ def _xl_s3(wb, data, unit):
         row += 1
         n_warn_cols = 3 if has_grp else 2
         row = _sec(ws2, row, "[!] Overlap Warnings by Level", n_cols=n_warn_cols)
-        ws2.cell(row, 1, "Level").font = Font(bold=True)
-        ws2.cell(row, 2, f"Overlapping Area ({unit})").font = Font(bold=True)
+        ws2.cell(row, 1, "Level").font                         = Font(bold=True)
+        ws2.cell(row, 2, f"Overlapping Area ({unit})").font   = Font(bold=True)
         if has_grp:
             ws2.cell(row, 3, f"of which Cross-group ({unit})").font = Font(bold=True)
         row += 1
@@ -1102,19 +1801,21 @@ def _xl_s3(wb, data, unit):
             row = _warn(ws2, row, level_name, total_ov, n_cols=n_warn_cols)
             if has_grp and cross_ov > 1e-6:
                 vc = ws2.cell(row - 1, 3, cross_ov)
-                vc.font = _WARN_FONT
-                vc.fill = _WARN_FILL
+                vc.font          = _WARN_FONT
+                vc.fill          = _WARN_FILL
                 vc.number_format = _AREA_FMT
         row += 1
-        row = _warn(ws2, row, "Some objects share footprint area. Verify whether double-counting is intentional.", n_cols=n_warn_cols)
+        row = _warn(ws2, row,
+                    "Some objects share footprint area. Verify whether double-counting is intentional.",
+                    n_cols=n_warn_cols)
 
 
 def export_to_excel(data, filepath):
     """Write calculation results to an Excel workbook with Objects + Summary sheets."""
     wb = openpyxl.Workbook()
-    wb.remove(wb.active)  # drop the default empty sheet
+    wb.remove(wb.active)
 
-    s = data["scenario"]
+    s    = data["scenario"]
     unit = data["unit"]
 
     if s == 1:

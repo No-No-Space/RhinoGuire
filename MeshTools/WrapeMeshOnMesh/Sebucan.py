@@ -281,9 +281,10 @@ class SebucanForm(forms.Form):
     def __init__(self):
         super().__init__()
         self.Title     = "Sebucan — Wrap Mesh on Mesh"
-        self.Resizable = False
+        self.Resizable = True
         self.Padding   = drawing.Padding(10)
-        self.MinimumSize = drawing.Size(320, 420)
+        self.MinimumSize = drawing.Size(380, 460)
+        self.ClientSize  = drawing.Size(420, 540)
         self.Owner     = Rhino.UI.RhinoEtoApp.MainWindow
 
         self.dest_id    = None
