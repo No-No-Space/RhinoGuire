@@ -360,8 +360,9 @@ class ColorManagerDialog(forms.Form):
 
         self.Title = "Color Manager"
         self.Padding = drawing.Padding(10)
-        self.Resizable = True
-        self.Size = drawing.Size(500, 600)
+        self.Resizable   = True
+        self.MinimumSize = drawing.Size(480, 540)
+        self.ClientSize  = drawing.Size(520, 640)
         self.Topmost = True  # Keep on top
 
         self.create_controls()
@@ -702,8 +703,9 @@ class DataVisualizationTool(forms.Form):
 
         self.Title = "Data Visualization Tool (Excel)"
         self.Padding = drawing.Padding(15)
-        self.Resizable = False
-        self.Size = drawing.Size(450, 420)
+        self.Resizable   = True
+        self.MinimumSize = drawing.Size(420, 400)
+        self.ClientSize  = drawing.Size(480, 480)
         self.Topmost = True  # KEEP ON TOP
 
         self.create_controls()

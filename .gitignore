@@ -173,6 +173,14 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Rhino outputs
+DataVisualization/_ExcelOutput/
+*.bak
+*.rui.bak
+
+# Local toolbar with hardcoded paths — commit only RhinoGuire.rui.template
+# ui/RhinoGuire.rui
+
 # Cursor  
 #  Cursor is an AI-powered code editor.`.cursorignore` specifies files/directories to 
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data

@@ -1,32 +1,36 @@
 #! python3
 # # -*- coding: utf-8 -*-
 # __title__ = "Baquiano"                           # Name of the button displayed in Revit UI
-# __doc__ = """Version = 0.5
-# Date    = 2026-02-14
-# Author: Aquelon - aquelon@pm.me 
+# __doc__ = """Version = 0.7
+# Date    = 2026-02-20
+# Author: Aquelon - aquelon@pm.me
 # _____________________________________________________________________
 # Description:
 # Advanced search tool for Rhino object metadata (User Keys/Values)
 # Supports include/exclude conditions and pre-selection filtering.
+# The window is modeless — Rhino stays accessible while it is open.
 # _____________________________________________________________________
 # How-to:
-# -> Optionally pre-select objects in Rhino to limit the search scope
 # -> Run the script in Rhino 8 (RunPythonScript), a search window opens
-# -> Choose search scope: all objects in the model or only pre-selected objects
-# -> Add include conditions: type Key name, Value, and select a match type
+# -> Optionally select objects in Rhino (form stays open, Rhino is accessible)
+# -> Choose search scope: all objects in the model or currently selected objects
+# -> Click the Key dropdown in any condition row to see available keys from the model
+# -> Use "Refresh Keys" to re-scan the model if you added new objects/keys
+# -> Add include conditions: pick or type a Key name, type a Value, and select a match type
 # -> Optionally add exclude conditions to filter out unwanted results
 # -> Use "+ Add" buttons to combine multiple conditions (AND for include, OR for exclude)
 # -> Click "Search" to find and select matching objects in the viewport
+# -> Repeat searches without closing the window
 # -> Match types: Contains, Equals, Starts/Ends with, and their negations (Does not...)
 # _____________________________________________________________________
 # Last update:
+# - [20.02.2026] - 0.7 Key field is now a ComboBox with suggestions from the model
+# - [20.02.2026] - 0.6 Converted to modeless form; search runs without closing window
 # - [14.02.2026] - 0.5 RELEASE
 # _____________________________________________________________________
 # To-Do:
 # - UI needs improvement, it is functional at the moment, but default look.
 # - Default folder locations need to be updated to neutral locations (desktop or documents) instead of script folder.
-# - Change the behaviour to allow the window be open and select objects to avoid the need to close and re-run the script.
-# - Evaluate if it is possible to add a function to autocomplete the keys available in the model, this way the user can select from existing keys instead of writing them, this will reduce the chances of typos and make it more user friendly.
 # _____________________________________________________________________
 
 
@@ -34,6 +38,20 @@ import rhinoscriptsyntax as rs
 import Rhino
 import Eto.Drawing as drawing
 import Eto.Forms as forms
+
+
+def get_all_user_text_keys():
+    """Collect all unique user text keys from every object in the model, sorted."""
+    all_objects = rs.AllObjects()
+    if not all_objects:
+        return []
+    keys = set()
+    for obj_guid in all_objects:
+        obj_keys = rs.GetUserText(obj_guid)  # returns list of key strings, or None
+        if obj_keys:
+            for k in obj_keys:
+                keys.add(k)
+    return sorted(keys)
 
 
 class SearchCondition:
@@ -74,15 +92,18 @@ class SearchCondition:
 
 class ConditionRow:
     """UI row for a single search condition."""
-    def __init__(self, parent_dialog, is_exclude=False):
-        self.parent = parent_dialog
+    def __init__(self, parent_form, is_exclude=False, available_keys=None):
+        self.parent = parent_form
         self.is_exclude = is_exclude
+        self.available_keys = available_keys or []
         self.create_controls()
 
     def create_controls(self):
-        self.key_textbox = forms.TextBox()
-        self.key_textbox.PlaceholderText = "Key name"
-        self.key_textbox.Width = 120
+        # ComboBox lets the user pick a key from the model OR type a custom one
+        self.key_combo = forms.ComboBox()
+        self.key_combo.DataStore = self.available_keys
+        self.key_combo.PlaceholderText = "Key name"
+        self.key_combo.Width = 150
 
         self.value_textbox = forms.TextBox()
         self.value_textbox.PlaceholderText = "Search value"
@@ -105,21 +126,28 @@ class ConditionRow:
         self.remove_button.Width = 30
         self.remove_button.Click += self.on_remove
 
-        # Create the horizontal layout for this row
+        # Horizontal layout for this row
         self.row_layout = forms.StackLayout()
         self.row_layout.Orientation = forms.Orientation.Horizontal
         self.row_layout.Spacing = 5
-        self.row_layout.Items.Add(forms.StackLayoutItem(self.key_textbox))
+        self.row_layout.Items.Add(forms.StackLayoutItem(self.key_combo))
         self.row_layout.Items.Add(forms.StackLayoutItem(self.value_textbox))
         self.row_layout.Items.Add(forms.StackLayoutItem(self.match_dropdown))
         self.row_layout.Items.Add(forms.StackLayoutItem(self.remove_button))
+
+    def update_available_keys(self, keys):
+        """Repopulate the key ComboBox after a model refresh, preserving current text."""
+        current_text = self.key_combo.Text
+        self.available_keys = keys
+        self.key_combo.DataStore = keys
+        self.key_combo.Text = current_text
 
     def on_remove(self, sender, e):
         self.parent.remove_condition(self)
 
     def get_condition(self):
         """Returns a SearchCondition object or None if empty."""
-        key = self.key_textbox.Text.strip()
+        key = self.key_combo.Text.strip()
         value = self.value_textbox.Text.strip()
         if not key or not value:
             return None
@@ -133,19 +161,22 @@ class ConditionRow:
         return SearchCondition(key, value, match_type, self.is_exclude)
 
 
-class LighthouseSearchDialog(forms.Dialog[bool]):
-    """Main search dialog."""
+class BaquianoSearchForm(forms.Form):
+    """Main search form — modeless, stays open between searches."""
 
     def __init__(self, preselection_count=0):
-        super(LighthouseSearchDialog, self).__init__()
+        super().__init__()
         self.preselection_count = preselection_count
         self.has_preselection = preselection_count > 0
         self.include_conditions = []
         self.exclude_conditions = []
-        self.Title = "Lighthouse Search Data"
+        self.available_keys = get_all_user_text_keys()
+        self.Title = "Baquiano Search Data"
         self.Padding = drawing.Padding(10)
         self.Resizable = True
-        self.MinimumSize = drawing.Size(550, 400)
+        self.MinimumSize = drawing.Size(480, 480)
+        self.ClientSize  = drawing.Size(640, 580)
+        self.Owner = Rhino.UI.RhinoEtoApp.MainWindow
         self.create_controls()
 
     def create_controls(self):
@@ -170,32 +201,39 @@ class LighthouseSearchDialog(forms.Dialog[bool]):
         self.scope_all_radio.Checked = not self.has_preselection
 
         self.scope_selected_radio = forms.RadioButton(self.scope_all_radio)
-        self.scope_selected_radio.Text = "Search only pre-selected objects"
+        self.scope_selected_radio.Text = "Search currently selected objects"
         self.scope_selected_radio.Checked = self.has_preselection
-        self.scope_selected_radio.Enabled = self.has_preselection
 
-        if not self.has_preselection:
-            hint = forms.Label()
-            hint.Text = "(No objects were selected before running the script)"
-            hint.TextColor = drawing.Colors.Gray
-            layout.AddRow(self.scope_all_radio)
-            scope_row = forms.StackLayout()
-            scope_row.Orientation = forms.Orientation.Horizontal
-            scope_row.Spacing = 10
-            scope_row.Items.Add(forms.StackLayoutItem(self.scope_selected_radio))
-            scope_row.Items.Add(forms.StackLayoutItem(hint))
-            layout.AddRow(scope_row)
-        else:
-            count_label = forms.Label()
-            count_label.Text = f"({self.preselection_count} objects selected)"
-            count_label.TextColor = drawing.Colors.Green
-            layout.AddRow(self.scope_all_radio)
-            scope_row = forms.StackLayout()
-            scope_row.Orientation = forms.Orientation.Horizontal
-            scope_row.Spacing = 10
-            scope_row.Items.Add(forms.StackLayoutItem(self.scope_selected_radio))
-            scope_row.Items.Add(forms.StackLayoutItem(count_label))
-            layout.AddRow(scope_row)
+        hint = forms.Label()
+        hint.Text = "(select objects in Rhino, then click Search)"
+        hint.TextColor = drawing.Colors.Gray
+
+        layout.AddRow(self.scope_all_radio)
+        scope_row = forms.StackLayout()
+        scope_row.Orientation = forms.Orientation.Horizontal
+        scope_row.Spacing = 10
+        scope_row.Items.Add(forms.StackLayoutItem(self.scope_selected_radio))
+        scope_row.Items.Add(forms.StackLayoutItem(hint))
+        layout.AddRow(scope_row)
+
+        layout.AddRow(None)
+
+        # Key suggestions info row
+        keys_row = forms.StackLayout()
+        keys_row.Orientation = forms.Orientation.Horizontal
+        keys_row.Spacing = 10
+
+        self.keys_info_label = forms.Label()
+        self.keys_info_label.Text = self._keys_info_text()
+        self.keys_info_label.TextColor = drawing.Colors.Gray
+
+        refresh_btn = forms.Button()
+        refresh_btn.Text = "Refresh Keys"
+        refresh_btn.Click += self.on_refresh_keys
+
+        keys_row.Items.Add(forms.StackLayoutItem(self.keys_info_label, True))
+        keys_row.Items.Add(forms.StackLayoutItem(refresh_btn))
+        layout.AddRow(keys_row)
 
         layout.AddRow(None)
 
@@ -205,13 +243,13 @@ class LighthouseSearchDialog(forms.Dialog[bool]):
         include_label.Font = drawing.Font(drawing.SystemFont.Bold)
         layout.AddRow(include_label)
 
-        # Header row for include
+        # Column headers for include
         include_header = forms.StackLayout()
         include_header.Orientation = forms.Orientation.Horizontal
         include_header.Spacing = 5
         key_lbl = forms.Label()
         key_lbl.Text = "Key"
-        key_lbl.Width = 120
+        key_lbl.Width = 150
         val_lbl = forms.Label()
         val_lbl.Text = "Value"
         val_lbl.Width = 150
@@ -241,13 +279,13 @@ class LighthouseSearchDialog(forms.Dialog[bool]):
         exclude_label.Font = drawing.Font(drawing.SystemFont.Bold)
         layout.AddRow(exclude_label)
 
-        # Header row for exclude
+        # Column headers for exclude
         exclude_header = forms.StackLayout()
         exclude_header.Orientation = forms.Orientation.Horizontal
         exclude_header.Spacing = 5
         key_lbl2 = forms.Label()
         key_lbl2.Text = "Key"
-        key_lbl2.Width = 120
+        key_lbl2.Width = 150
         val_lbl2 = forms.Label()
         val_lbl2.Text = "Value"
         val_lbl2.Width = 150
@@ -271,7 +309,7 @@ class LighthouseSearchDialog(forms.Dialog[bool]):
 
         layout.AddRow(None)
 
-        # Buttons
+        # Bottom button row
         button_layout = forms.StackLayout()
         button_layout.Orientation = forms.Orientation.Horizontal
         button_layout.Spacing = 10
@@ -280,34 +318,67 @@ class LighthouseSearchDialog(forms.Dialog[bool]):
         search_btn.Text = "Search"
         search_btn.Click += self.on_search
 
-        cancel_btn = forms.Button()
-        cancel_btn.Text = "Cancel"
-        cancel_btn.Click += self.on_cancel
+        close_btn = forms.Button()
+        close_btn.Text = "Close"
+        close_btn.Click += self.on_close_btn
 
         button_layout.Items.Add(forms.StackLayoutItem(search_btn))
-        button_layout.Items.Add(forms.StackLayoutItem(cancel_btn))
+        button_layout.Items.Add(forms.StackLayoutItem(close_btn))
 
         layout.AddRow(button_layout)
 
-        self.Content = layout
+        # Status label — updated after each search or refresh
+        self.status_label = forms.Label()
+        self.status_label.Text = "Ready."
+        self.status_label.TextColor = drawing.Colors.Gray
+        layout.AddRow(self.status_label)
+
+        # Wrap the whole layout in a Scrollable so the form stays a fixed size
+        # even when many conditions are added.
+        outer_scroll = forms.Scrollable()
+        outer_scroll.ExpandContentWidth = True
+        outer_scroll.ExpandContentHeight = False
+        outer_scroll.Content = layout
+        self.Content = outer_scroll
 
         # Add first include condition by default
         self.add_include_condition()
 
+    # ------------------------------------------------------------------
+    # Key helpers
+    # ------------------------------------------------------------------
+
+    def _keys_info_text(self):
+        count = len(self.available_keys)
+        if count == 0:
+            return "No user text keys found in model."
+        return f"Key suggestions: {count} unique key(s) loaded from model."
+
+    def on_refresh_keys(self, _sender, _e):
+        self.available_keys = get_all_user_text_keys()
+        self.keys_info_label.Text = self._keys_info_text()
+        for row in self.include_conditions + self.exclude_conditions:
+            row.update_available_keys(self.available_keys)
+        self.status_label.Text = f"Keys refreshed — {len(self.available_keys)} key(s) found."
+        self.status_label.TextColor = drawing.Colors.Gray
+
+    # ------------------------------------------------------------------
+    # Condition management
+    # ------------------------------------------------------------------
+
     def add_include_condition(self):
-        cond = ConditionRow(self, is_exclude=False)
+        cond = ConditionRow(self, is_exclude=False, available_keys=self.available_keys)
         self.include_conditions.append(cond)
         self.include_stack.Items.Add(forms.StackLayoutItem(cond.row_layout))
 
     def add_exclude_condition(self):
-        cond = ConditionRow(self, is_exclude=True)
+        cond = ConditionRow(self, is_exclude=True, available_keys=self.available_keys)
         self.exclude_conditions.append(cond)
         self.exclude_stack.Items.Add(forms.StackLayoutItem(cond.row_layout))
 
     def remove_condition(self, condition_row):
         if condition_row in self.include_conditions:
             self.include_conditions.remove(condition_row)
-            # Find and remove the item from the stack
             for i in range(self.include_stack.Items.Count):
                 if self.include_stack.Items[i].Control == condition_row.row_layout:
                     self.include_stack.Items.RemoveAt(i)
@@ -325,14 +396,49 @@ class LighthouseSearchDialog(forms.Dialog[bool]):
     def on_add_exclude(self, sender, e):
         self.add_exclude_condition()
 
-    def on_search(self, sender, e):
-        self.Close(True)
+    # ------------------------------------------------------------------
+    # Search
+    # ------------------------------------------------------------------
 
-    def on_cancel(self, sender, e):
-        self.Close(False)
+    def on_search(self, sender, e):
+        include_conditions = self.get_include_conditions()
+        exclude_conditions = self.get_exclude_conditions()
+
+        if not include_conditions:
+            self.status_label.Text = "Error: specify at least one include condition."
+            self.status_label.TextColor = drawing.Colors.Red
+            return
+
+        # Determine search scope — reads live Rhino selection if "selected" is chosen
+        if self.scope_all_radio.Checked:
+            objects_to_search = rs.AllObjects() or []
+        else:
+            objects_to_search = rs.SelectedObjects() or []
+
+        if not objects_to_search:
+            self.status_label.Text = "No objects in the selected scope."
+            self.status_label.TextColor = drawing.Colors.Red
+            return
+
+        results = perform_search(objects_to_search, include_conditions, exclude_conditions)
+
+        rs.UnselectAllObjects()
+        if results:
+            rs.SelectObjects(results)
+            inc_summary = ", ".join([f"{c.key}={c.value}" for c in include_conditions])
+            scope_text = "all objects" if self.scope_all_radio.Checked else f"{len(objects_to_search)} selected"
+            self.status_label.Text = (
+                f"Found {len(results)} object(s) in {scope_text} | Include: {inc_summary}"
+            )
+            self.status_label.TextColor = drawing.Colors.Green
+        else:
+            self.status_label.Text = "No objects found matching the search criteria."
+            self.status_label.TextColor = drawing.Colors.Orange
+
+    def on_close_btn(self, _sender, _e):
+        self.Close()
 
     def get_include_conditions(self):
-        """Returns list of valid include SearchCondition objects."""
         conditions = []
         for row in self.include_conditions:
             cond = row.get_condition()
@@ -341,16 +447,12 @@ class LighthouseSearchDialog(forms.Dialog[bool]):
         return conditions
 
     def get_exclude_conditions(self):
-        """Returns list of valid exclude SearchCondition objects."""
         conditions = []
         for row in self.exclude_conditions:
             cond = row.get_condition()
             if cond:
                 conditions.append(cond)
         return conditions
-
-    def search_all_objects(self):
-        return self.scope_all_radio.Checked
 
 
 def perform_search(objects_to_search, include_conditions, exclude_conditions):
@@ -381,68 +483,12 @@ def perform_search(objects_to_search, include_conditions, exclude_conditions):
 
 
 def main():
-    # Check for pre-selected objects
+    # Capture any pre-selection to default scope radio accordingly
     preselected = rs.SelectedObjects()
     preselection_count = len(preselected) if preselected else 0
 
-    # Deselect to allow fresh selection after search
-    if preselected:
-        rs.UnselectAllObjects()
-
-    # Show dialog
-    dialog = LighthouseSearchDialog(preselection_count=preselection_count)
-    result = dialog.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow)
-
-    if not result:
-        dialog.Dispose()
-        # Restore original selection if cancelled
-        if preselected:
-            rs.SelectObjects(preselected)
-        return
-
-    # Get search parameters
-    include_conditions = dialog.get_include_conditions()
-    exclude_conditions = dialog.get_exclude_conditions()
-    search_all = dialog.search_all_objects()
-
-    dialog.Dispose()
-
-    # Validate - need at least one include condition
-    if not include_conditions:
-        rs.MessageBox("Please specify at least one include condition.", 0, "Search Error")
-        if preselected:
-            rs.SelectObjects(preselected)
-        return
-
-    # Determine search scope
-    if search_all:
-        objects_to_search = rs.AllObjects()
-    else:
-        objects_to_search = preselected
-
-    if not objects_to_search:
-        rs.MessageBox("No objects to search.", 0, "Search Error")
-        return
-
-    # Perform search
-    results = perform_search(objects_to_search, include_conditions, exclude_conditions)
-
-    # Report and select results
-    if results:
-        rs.SelectObjects(results)
-
-        # Build summary message
-        inc_summary = ", ".join([f"{c.key}={c.value}" for c in include_conditions])
-        exc_summary = ", ".join([f"{c.key}={c.value}" for c in exclude_conditions]) if exclude_conditions else "None"
-
-        msg = f"Found {len(results)} object(s)\n\n"
-        msg += f"Include: {inc_summary}\n"
-        msg += f"Exclude: {exc_summary}\n"
-        msg += f"Searched: {'All objects' if search_all else 'Pre-selected objects'} ({len(objects_to_search)} total)"
-
-        rs.MessageBox(msg, 0, "Search Results")
-    else:
-        rs.MessageBox("No objects found matching the search criteria.", 0, "Search Results")
+    form = BaquianoSearchForm(preselection_count=preselection_count)
+    form.Show()
 
 
 if __name__ == "__main__":
