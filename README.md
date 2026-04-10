@@ -20,13 +20,16 @@ Search and select Rhino objects by their metadata using include/exclude conditio
 
 Calculates the **footprint area** of Rhino objects — the plan area as seen from directly above (XY projection), distinct from Rhino's built-in `Area` command which sums all faces.
 
-Runs as a modeless window. Three calculation scenarios:
+Runs as a modeless window with six calculation scenarios:
 
 - **S1 — Selected Objects:** individual footprint per object, no overlap handling.
 - **S2 — By Layer:** footprints of all objects on a layer with Boolean Union to remove overlapping regions.
 - **S3 — Layer Hierarchy:** targets a parent layer whose sublayers represent floors. Overlaps removed per floor; grand total follows standard Gross Floor Area logic.
+- **S4 — Custom Aggregation:** user-defined key hierarchy (e.g. Domain → Main Group → Subgroup → Room Type). Footprints merged per leaf group per floor (same as S3), summed across all floors. Results shown as an indented tree; exports to Excel.
+- **R1 — Room Analysis:** aggregates areas by a chosen key across all floors and compares totals to target values. Displayed as bullet charts with tolerance bands. Data source: S3 keys or S4 hierarchy.
+- **R2 — Group Analysis:** same as R1 but at a group/classification level.
 
-Supports labelling via user text keys and optional Excel export (planned).
+Supports labelling via user text keys, Write Area to Objects, Excel export (S1–S4), and PNG chart export (R1–R2).
 
 ### [Sebucan](MeshTools/WrapeMeshOnMesh/) — Wrap Mesh on Mesh
 
