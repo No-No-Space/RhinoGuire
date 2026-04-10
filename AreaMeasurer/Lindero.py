@@ -2,8 +2,8 @@
 # r: openpyxl
 # -*- coding: utf-8 -*-
 # __title__ = "Lindero"
-# __doc__ = """Version = 0.3
-# Date    = 2026-03-26
+# __doc__ = """Version = 0.4
+# Date    = 2026-04-10
 # Author: Aquelon - aquelon@pm.me
 # _____________________________________________________________________
 # Description:
@@ -11,7 +11,7 @@
 # "Footprint" = the plan area (XY projection), NOT the sum of all surfaces.
 # Modeless window — Rhino stays accessible while it is open.
 # _____________________________________________________________________
-# Five scenarios:
+# Six scenarios:
 #   S1 — Selected Objects:
 #        Individual footprint per object, no overlap handling.
 #
@@ -24,15 +24,25 @@
 #        Objects carry two user text keys: an object key and a group key.
 #        Overlaps removed within each sublayer.
 #
-#   S4 — Room Analysis:
-#        Aggregates individual areas by Object Key (S3) across all floors.
-#        Compares totals to a Room Target Key (set in Settings).
-#        Bullet chart per room type.
+#   S4 — Custom Aggregation:
+#        User-defined hierarchy of attribute keys (e.g. Domain → Main Group
+#        → Subgroup → Room Type). Per sublayer, footprints are merged within
+#        each leaf group (same as S3). Leaf totals are then summed across
+#        all sublayers. Results shown as an indented tree.
 #
-#   S5 — Group Analysis:
-#        Same as S4 but aggregates by Group Key and compares to Group Target Key.
+#   R1 — Room Analysis:
+#        Aggregates individual areas by Object Key across all floors.
+#        Compares totals to a Room Target Key (set in Settings).
+#        Bullet chart per room type. Data source: S3 keys or S4 hierarchy
+#        (configurable in Settings).
+#
+#   R2 — Group Analysis:
+#        Same as R1 but aggregates by Group Key and compares to Group Target Key.
+#        Data source: S3 keys or S4 hierarchy (configurable in Settings).
 # _____________________________________________________________________
 # Last update:
+# - [10.04.2026] - 0.4 S4 Custom Aggregation, R1/R2 (renamed from S4/S5),
+#                     R1/R2 data source toggle (S3 keys or S4 hierarchy)
 # - [26.03.2026] - 0.3 Settings tab, S4/S5 bullet-chart analysis, Write Area,
 #                     per-tab results areas, overlap warnings
 # - [20.02.2026] - 0.2 Export results to Excel (Objects + Summary sheets)
@@ -314,9 +324,66 @@ def calc_s3(parent_layer, obj_key, grp_key):
     return result
 
 
-def calc_s4(parent_layer, obj_key, room_target_key):
+def calc_s4(parent_layer, key_sequence):
     """
-    Scenario 4 — Room Analysis.
+    Scenario 4 — Custom Aggregation.
+    key_sequence: ordered list of user text key names.
+    Per sublayer, objects are grouped by their full key-value path tuple.
+    Footprints within each leaf group are merged (Boolean Union) per sublayer,
+    matching S3 overlap handling. Leaf totals are then summed across sublayers.
+    Returns {tree, overall_total, warnings}.
+
+    tree: nested dict  {value_str: {"area": float, "children": {...}}}
+    Each node's "area" = cumulative sum of all descendant leaf areas.
+    """
+    if not key_sequence:
+        return {"tree": {}, "overall_total": 0.0, "warnings": ["[!] No keys defined."]}
+
+    # flat_buckets[path_tuple] = cumulative area across all floors
+    flat_buckets = {}
+
+    for sl in get_child_layers(parent_layer):
+        guids = get_layer_objects(sl)
+        if not guids:
+            continue
+
+        # Group objects by their full key path
+        path_groups = {}
+        for guid in guids:
+            path = tuple(
+                (rs.GetUserText(guid, k) if k else None) or "—"
+                for k in key_sequence
+            )
+            path_groups.setdefault(path, []).append(guid)
+
+        # Per leaf group in this floor: merged footprint (Boolean Union)
+        for path, path_guids in path_groups.items():
+            area, _ = combined_area(path_guids)
+            flat_buckets[path] = flat_buckets.get(path, 0.0) + area
+
+    # Build nested tree — each ancestor accumulates all descendant leaf areas
+    tree = {}
+    for path in sorted(flat_buckets):
+        leaf_area = flat_buckets[path]
+        node = tree
+        for key_val in path:
+            if key_val not in node:
+                node[key_val] = {"area": 0.0, "children": {}}
+            node[key_val]["area"] += leaf_area
+            node = node[key_val]["children"]
+
+    overall_total = sum(v["area"] for v in tree.values())
+
+    warnings = []
+    if not flat_buckets:
+        warnings.append("[!] No objects found in any sublayer.")
+
+    return {"tree": tree, "overall_total": overall_total, "warnings": warnings}
+
+
+def calc_r1(parent_layer, obj_key, room_target_key):
+    """
+    R1 — Room Analysis.
     Sums individual footprint areas across all sublayers, grouped by obj_key value.
     Compares each group total to room_target_key.
     Returns {entries: [{label, measured, goal}], warnings: [str]}.
@@ -353,9 +420,9 @@ def calc_s4(parent_layer, obj_key, room_target_key):
     return {"entries": entries, "warnings": warnings}
 
 
-def calc_s5(parent_layer, grp_key, grp_target_key):
+def calc_r2(parent_layer, grp_key, grp_target_key):
     """
-    Scenario 5 — Group Analysis.
+    R2 — Group Analysis.
     Sums individual footprint areas across all sublayers, grouped by grp_key value.
     Compares each group total to grp_target_key.
     Returns {entries: [{label, measured, goal}], warnings: [str]}.
@@ -527,8 +594,44 @@ def format_s3(data, parent_layer, obj_key, grp_key, unit):
     return "\n".join(lines)
 
 
+def format_s4(data, parent_layer, key_sequence, unit):
+    """Format the S4 custom aggregation tree as indented monospace text."""
+    if not data["tree"]:
+        return f"  No data found under '{parent_layer}'.\n"
+
+    key_path_str = " > ".join(key_sequence) if key_sequence else "—"
+    lines = [
+        _rule(),
+        f"  SCENARIO 4 — CUSTOM AGGREGATION   [{unit}]",
+        f"  Parent : {parent_layer}",
+        f"  Keys   : {key_path_str}",
+        _rule("─"),
+    ]
+
+    def walk(node, level):
+        for val in sorted(node):
+            entry = node[val]
+            indent = "    " * level
+            if entry["children"]:
+                label = f"  {indent}▸ {val}"
+            else:
+                label = f"  {indent}  {val}"
+            lines.append(_row(label[:38], _fmt(entry["area"])))
+            if entry["children"]:
+                walk(entry["children"], level + 1)
+
+    walk(data["tree"], 0)
+
+    lines += [_rule("─"), _row("OVERALL TOTAL", _fmt(data["overall_total"])), _rule(), ""]
+
+    if data.get("warnings"):
+        lines.insert(-1, "\n".join(f"  {w}" for w in data["warnings"]))
+
+    return "\n".join(lines)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
-# Bullet chart drawing helpers (S4 / S5)
+# Bullet chart drawing helpers (R1 / R2)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _CHART_ROW_H   = 54
@@ -635,7 +738,7 @@ def _export_chart_png(entries, tol, unit, path, chart_width=900):
     n = max(1, len(entries))
     height = n * _CHART_ROW_H + 20
     bmp = drawing.Bitmap(chart_width, height, drawing.PixelFormat.Format32bppRgba)
-    g = drawing.Graphics.Create(bmp)
+    g = drawing.Graphics(bmp)
     try:
         g.FillRectangle(drawing.Colors.White,
                         drawing.RectangleF(0.0, 0.0, float(chart_width), float(height)))
@@ -671,14 +774,15 @@ class LinderoForm(forms.Form):
         self._last_s1 = None   # list of {guid, name, area}
         self._last_s2 = None   # {objects, total, union_ok}
         self._last_s3 = None   # {sublayers, overall_total}
+        self._last_s4 = None   # {tree, overall_total, warnings}
 
-        # S4 / S5 chart state
-        self._s4_entries = []
-        self._s4_tol     = 0.10
-        self._s4_unit    = ""
-        self._s5_entries = []
-        self._s5_tol     = 0.10
-        self._s5_unit    = ""
+        # R1 / R2 chart state
+        self._r1_entries = []
+        self._r1_tol     = 0.10
+        self._r1_unit    = ""
+        self._r2_entries = []
+        self._r2_tol     = 0.10
+        self._r2_unit    = ""
 
         self._build_ui()
 
@@ -698,7 +802,8 @@ class LinderoForm(forms.Form):
         self.tabs.Pages.Add(self._tab_s2())
         self.tabs.Pages.Add(self._tab_s3())
         self.tabs.Pages.Add(self._tab_s4())
-        self.tabs.Pages.Add(self._tab_s5())
+        self.tabs.Pages.Add(self._tab_r1())
+        self.tabs.Pages.Add(self._tab_r2())
         self.tabs.Pages.Add(self._tab_settings())
         outer.Items.Add(forms.StackLayoutItem(self.tabs, True))
 
@@ -934,12 +1039,12 @@ class LinderoForm(forms.Form):
         return page
 
     # ------------------------------------------------------------------
-    # Tab builders — S4 / S5
+    # Tab builder — S4 (Custom Aggregation)
     # ------------------------------------------------------------------
 
     def _tab_s4(self):
         page = forms.TabPage()
-        page.Text = "S4 — Room Analysis"
+        page.Text = "S4 — Custom Aggregation"
 
         layout = forms.StackLayout()
         layout.Orientation = forms.Orientation.Vertical
@@ -949,37 +1054,104 @@ class LinderoForm(forms.Form):
 
         desc = forms.Label()
         desc.Text = (
-            "Aggregates individual object areas by Object Key (S3) across all "
-            "floors of the S3 Parent Layer. Compares totals to Room Target Key "
-            "(set in Settings). Uses S3 tolerance setting."
+            "Groups objects by a user-defined hierarchy of attribute keys. "
+            "Footprints are merged per leaf group per floor (same as S3), "
+            "then summed across all floors of the chosen parent layer."
         )
         desc.TextColor = drawing.Colors.Gray
         desc.Wrap = forms.WrapMode.Word
-
-        self.warn_s4 = forms.Label()
-        self.warn_s4.TextColor = drawing.Color(0.6, 0.1, 0.1)
-        self.warn_s4.Wrap = forms.WrapMode.Word
-        self.warn_s4.Visible = False
-
-        self.chart_s4 = forms.Drawable()
-        self.chart_s4.Size = drawing.Size(400, 10)
-        self.chart_s4.Paint += self._paint_s4
-
-        scroll_s4 = forms.Scrollable()
-        scroll_s4.ExpandContentWidth = True
-        scroll_s4.ExpandContentHeight = False
-        scroll_s4.Content = self.chart_s4
-
         layout.Items.Add(forms.StackLayoutItem(desc))
-        layout.Items.Add(forms.StackLayoutItem(self.warn_s4))
-        layout.Items.Add(forms.StackLayoutItem(scroll_s4, True))
+
+        # Parent layer row
+        pl_row = forms.DynamicLayout()
+        pl_row.DefaultSpacing = drawing.Size(5, 4)
+        pl_row.Padding = drawing.Padding(0, 4, 0, 4)
+        pl_lbl = forms.Label()
+        pl_lbl.Text = "Parent Layer:"
+        self.parent_layer_s4_dd = forms.DropDown()
+        self._populate_layer_dd(self.parent_layer_s4_dd)
+        self.parent_layer_s4_dd.Width = 300
+        pl_row.AddRow(pl_lbl, self.parent_layer_s4_dd)
+        layout.Items.Add(forms.StackLayoutItem(pl_row))
+
+        # Keys section header + Add button
+        keys_header = forms.StackLayout()
+        keys_header.Orientation = forms.Orientation.Horizontal
+        keys_header.Spacing = 10
+        keys_header.Padding = drawing.Padding(0, 2, 0, 2)
+        keys_lbl = forms.Label()
+        keys_lbl.Text = "Attribute Keys  (top row = level 1, bottom = deepest):"
+        add_btn = forms.Button()
+        add_btn.Text = "+ Add Level"
+        add_btn.Click += self._on_s4_add_key
+        keys_header.Items.Add(forms.StackLayoutItem(keys_lbl))
+        keys_header.Items.Add(forms.StackLayoutItem(add_btn))
+        layout.Items.Add(forms.StackLayoutItem(keys_header))
+
+        # Dynamic key rows container
+        self._s4_keys_layout = forms.StackLayout()
+        self._s4_keys_layout.Orientation = forms.Orientation.Vertical
+        self._s4_keys_layout.Spacing = 3
+        self._s4_key_rows = []
+        self._s4_add_key_row()   # seed with one empty row
+        layout.Items.Add(forms.StackLayoutItem(self._s4_keys_layout))
+
+        # Results text area
+        self.results_s4 = forms.TextArea()
+        self.results_s4.ReadOnly = True
+        self.results_s4.Font = drawing.Font("Courier New", 9)
+        self.results_s4.Text = "Define at least one key, select a parent layer, and click Calculate.\n"
+        layout.Items.Add(forms.StackLayoutItem(self.results_s4, True))
 
         page.Content = layout
         return page
 
-    def _tab_s5(self):
+    def _s4_add_key_row(self, initial_text=""):
+        """Append one attribute-key combo row to the S4 dynamic list."""
+        row = forms.StackLayout()
+        row.Orientation = forms.Orientation.Horizontal
+        row.Spacing = 4
+
+        cb = forms.ComboBox()
+        cb.DataStore = self.available_keys
+        cb.Text = initial_text
+        cb.Width = 280
+
+        rm_btn = forms.Button()
+        rm_btn.Text = "✕"
+        rm_btn.Width = 28
+
+        def on_remove(s, e, r=row, c=cb):
+            self._s4_remove_key_row(r, c)
+        rm_btn.Click += on_remove
+
+        row.Items.Add(forms.StackLayoutItem(cb, True))
+        row.Items.Add(forms.StackLayoutItem(rm_btn))
+
+        self._s4_key_rows.append(cb)
+        self._s4_keys_layout.Items.Add(forms.StackLayoutItem(row))
+
+    def _on_s4_add_key(self, _s, _e):
+        self._s4_add_key_row()
+
+    def _s4_remove_key_row(self, row_ctrl, cb):
+        """Remove a key row, keeping at least one."""
+        if len(self._s4_key_rows) <= 1:
+            return
+        if cb in self._s4_key_rows:
+            self._s4_key_rows.remove(cb)
+        for i in range(self._s4_keys_layout.Items.Count):
+            if self._s4_keys_layout.Items[i].Control is row_ctrl:
+                self._s4_keys_layout.Items.RemoveAt(i)
+                break
+
+    # ------------------------------------------------------------------
+    # Tab builders — R1 / R2
+    # ------------------------------------------------------------------
+
+    def _tab_r1(self):
         page = forms.TabPage()
-        page.Text = "S5 — Group Analysis"
+        page.Text = "R1 — Room Analysis"
 
         layout = forms.StackLayout()
         layout.Orientation = forms.Orientation.Vertical
@@ -989,30 +1161,70 @@ class LinderoForm(forms.Form):
 
         desc = forms.Label()
         desc.Text = (
-            "Aggregates individual object areas by Group Key (S3) across all "
-            "floors of the S3 Parent Layer. Compares totals to Group Target Key "
-            "(set in Settings). Uses S3 tolerance setting."
+            "Aggregates individual object areas by Object Key across all floors. "
+            "Compares totals to Room Target Key (set in Settings). "
+            "Data source: S3 keys or S4 hierarchy (configurable in Settings)."
         )
         desc.TextColor = drawing.Colors.Gray
         desc.Wrap = forms.WrapMode.Word
 
-        self.warn_s5 = forms.Label()
-        self.warn_s5.TextColor = drawing.Color(0.6, 0.1, 0.1)
-        self.warn_s5.Wrap = forms.WrapMode.Word
-        self.warn_s5.Visible = False
+        self.warn_r1 = forms.Label()
+        self.warn_r1.TextColor = drawing.Color(0.6, 0.1, 0.1)
+        self.warn_r1.Wrap = forms.WrapMode.Word
+        self.warn_r1.Visible = False
 
-        self.chart_s5 = forms.Drawable()
-        self.chart_s5.Size = drawing.Size(400, 10)
-        self.chart_s5.Paint += self._paint_s5
+        self.chart_r1 = forms.Drawable()
+        self.chart_r1.Size = drawing.Size(400, 10)
+        self.chart_r1.Paint += self._paint_r1
 
-        scroll_s5 = forms.Scrollable()
-        scroll_s5.ExpandContentWidth = True
-        scroll_s5.ExpandContentHeight = False
-        scroll_s5.Content = self.chart_s5
+        scroll_r1 = forms.Scrollable()
+        scroll_r1.ExpandContentWidth = True
+        scroll_r1.ExpandContentHeight = False
+        scroll_r1.Content = self.chart_r1
 
         layout.Items.Add(forms.StackLayoutItem(desc))
-        layout.Items.Add(forms.StackLayoutItem(self.warn_s5))
-        layout.Items.Add(forms.StackLayoutItem(scroll_s5, True))
+        layout.Items.Add(forms.StackLayoutItem(self.warn_r1))
+        layout.Items.Add(forms.StackLayoutItem(scroll_r1, True))
+
+        page.Content = layout
+        return page
+
+    def _tab_r2(self):
+        page = forms.TabPage()
+        page.Text = "R2 — Group Analysis"
+
+        layout = forms.StackLayout()
+        layout.Orientation = forms.Orientation.Vertical
+        layout.Spacing = 4
+        layout.Padding = drawing.Padding(8)
+        layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+
+        desc = forms.Label()
+        desc.Text = (
+            "Aggregates individual object areas by Group Key across all floors. "
+            "Compares totals to Group Target Key (set in Settings). "
+            "Data source: S3 keys or S4 hierarchy (configurable in Settings)."
+        )
+        desc.TextColor = drawing.Colors.Gray
+        desc.Wrap = forms.WrapMode.Word
+
+        self.warn_r2 = forms.Label()
+        self.warn_r2.TextColor = drawing.Color(0.6, 0.1, 0.1)
+        self.warn_r2.Wrap = forms.WrapMode.Word
+        self.warn_r2.Visible = False
+
+        self.chart_r2 = forms.Drawable()
+        self.chart_r2.Size = drawing.Size(400, 10)
+        self.chart_r2.Paint += self._paint_r2
+
+        scroll_r2 = forms.Scrollable()
+        scroll_r2.ExpandContentWidth = True
+        scroll_r2.ExpandContentHeight = False
+        scroll_r2.Content = self.chart_r2
+
+        layout.Items.Add(forms.StackLayoutItem(desc))
+        layout.Items.Add(forms.StackLayoutItem(self.warn_r2))
+        layout.Items.Add(forms.StackLayoutItem(scroll_r2, True))
 
         page.Content = layout
         return page
@@ -1084,22 +1296,80 @@ class LinderoForm(forms.Form):
         self.tolerance_stepper.Increment   = 0.5
         self.tolerance_stepper.Width       = 80
         tol_hint = forms.Label()
-        tol_hint.Text = "Symmetric tolerance applied in S4 and S5 bullet charts"
+        tol_hint.Text = "Symmetric tolerance applied in R1 and R2 bullet charts"
         tol_hint.TextColor = drawing.Colors.Gray
         layout.AddRow(tol_lbl, self.tolerance_stepper)
         layout.AddRow(None, tol_hint)
         layout.AddRow(None)
 
-        # ── Configuration ────────────────────────────────────────────
+        # ── R1 / R2 Data Source ───────────────────────────────────────
         sep2 = forms.Label()
         sep2.Text = "─" * 42
         sep2.TextColor = drawing.Colors.Gray
         layout.AddRow(sep2)
 
         sec3 = forms.Label()
-        sec3.Text = "Configuration"
+        sec3.Text = "R1 / R2 Data Source"
         sec3.Font = drawing.Font("Arial", 9, drawing.FontStyle.Bold)
         layout.AddRow(sec3)
+        layout.AddRow(None)
+
+        src_lbl = forms.Label()
+        src_lbl.Text = "Source:"
+        self.r1r2_source_dd = forms.DropDown()
+        self.r1r2_source_dd.Items.Add("S3 keys")
+        self.r1r2_source_dd.Items.Add("S4 hierarchy")
+        self.r1r2_source_dd.SelectedIndex = 0
+        self.r1r2_source_dd.Width = 180
+        src_hint = forms.Label()
+        src_hint.Text = "Which parent layer and keys feed the R1 and R2 bullet charts"
+        src_hint.TextColor = drawing.Colors.Gray
+        layout.AddRow(src_lbl, self.r1r2_source_dd)
+        layout.AddRow(None, src_hint)
+        layout.AddRow(None)
+
+        r1_lvl_lbl = forms.Label()
+        r1_lvl_lbl.Text = "R1 Room Level:"
+        self.r1_level_stepper = forms.NumericStepper()
+        self.r1_level_stepper.MinValue     = 1
+        self.r1_level_stepper.MaxValue     = 10
+        self.r1_level_stepper.Value        = 1
+        self.r1_level_stepper.DecimalPlaces = 0
+        self.r1_level_stepper.Increment    = 1
+        self.r1_level_stepper.Width        = 60
+        r1_lvl_hint = forms.Label()
+        r1_lvl_hint.Text = "Position in S4 key list used as room key  (1 = top level)"
+        r1_lvl_hint.TextColor = drawing.Colors.Gray
+        layout.AddRow(r1_lvl_lbl, self.r1_level_stepper)
+        layout.AddRow(None, r1_lvl_hint)
+        layout.AddRow(None)
+
+        r2_lvl_lbl = forms.Label()
+        r2_lvl_lbl.Text = "R2 Group Level:"
+        self.r2_level_stepper = forms.NumericStepper()
+        self.r2_level_stepper.MinValue     = 1
+        self.r2_level_stepper.MaxValue     = 10
+        self.r2_level_stepper.Value        = 2
+        self.r2_level_stepper.DecimalPlaces = 0
+        self.r2_level_stepper.Increment    = 1
+        self.r2_level_stepper.Width        = 60
+        r2_lvl_hint = forms.Label()
+        r2_lvl_hint.Text = "Position in S4 key list used as group key  (1 = top level)"
+        r2_lvl_hint.TextColor = drawing.Colors.Gray
+        layout.AddRow(r2_lvl_lbl, self.r2_level_stepper)
+        layout.AddRow(None, r2_lvl_hint)
+        layout.AddRow(None)
+
+        # ── Configuration ────────────────────────────────────────────
+        sep3 = forms.Label()
+        sep3.Text = "─" * 42
+        sep3.TextColor = drawing.Colors.Gray
+        layout.AddRow(sep3)
+
+        sec4 = forms.Label()
+        sec4.Text = "Configuration"
+        sec4.Font = drawing.Font("Arial", 9, drawing.FontStyle.Bold)
+        layout.AddRow(sec4)
         layout.AddRow(None)
 
         save_btn = forms.Button()
@@ -1111,7 +1381,7 @@ class LinderoForm(forms.Form):
         load_btn.Click += self.on_load_config
 
         cfg_hint = forms.Label()
-        cfg_hint.Text = 'Saves / loads key mapping and tolerance to "lindero_config.json"'
+        cfg_hint.Text = 'Saves / loads all settings to "lindero_config.json"'
         cfg_hint.TextColor = drawing.Colors.Gray
         layout.AddRow(save_btn, load_btn)
         layout.AddRow(None, cfg_hint)
@@ -1148,6 +1418,7 @@ class LinderoForm(forms.Form):
     def on_refresh_model(self, _sender, _e):
         prev_s2     = self._selected_layer(self.layer_s2_dd)
         prev_parent = self._selected_layer(self.parent_layer_dd)
+        prev_s4_par = self._selected_layer(self.parent_layer_s4_dd)
 
         self.available_keys   = get_all_user_text_keys()
         self.available_layers = all_layer_names()
@@ -1158,8 +1429,15 @@ class LinderoForm(forms.Form):
             combo.DataStore = self.available_keys
             combo.Text = txt
 
-        self._restore_layer_dd(self.layer_s2_dd,     prev_s2)
-        self._restore_layer_dd(self.parent_layer_dd, prev_parent)
+        # Refresh S4 dynamic key rows
+        for cb in self._s4_key_rows:
+            txt = cb.Text
+            cb.DataStore = self.available_keys
+            cb.Text = txt
+
+        self._restore_layer_dd(self.layer_s2_dd,        prev_s2)
+        self._restore_layer_dd(self.parent_layer_dd,    prev_parent)
+        self._restore_layer_dd(self.parent_layer_s4_dd, prev_s4_par)
 
         prev_wk = self._write_key_combo.Text
         self._write_key_combo.DataStore = ["Area"] + list(self.available_keys)
@@ -1180,13 +1458,14 @@ class LinderoForm(forms.Form):
                 1: self._run_s2,
                 2: self._run_s3,
                 3: self._run_s4,
-                4: self._run_s5,
+                4: self._run_r1,
+                5: self._run_r2,
             }
             fn = runners.get(idx)
             if fn:
                 fn(unit)
             else:
-                self.status_label.Text = "Switch to a calculation tab (S1–S5) to calculate."
+                self.status_label.Text = "Switch to a calculation tab (S1–S4, R1–R2) to calculate."
                 self.status_label.TextColor = drawing.Colors.Gray
         except Exception as ex:
             self.status_label.Text = f"Error: {ex}"
@@ -1201,19 +1480,22 @@ class LinderoForm(forms.Form):
         elif idx == 2:
             self.results_s3.Text = ""
         elif idx == 3:
-            self._s4_entries = []
-            self.warn_s4.Visible = False
-            self.chart_s4.Invalidate()
+            self.results_s4.Text = ""
+            self._last_s4 = None
         elif idx == 4:
-            self._s5_entries = []
-            self.warn_s5.Visible = False
-            self.chart_s5.Invalidate()
+            self._r1_entries = []
+            self.warn_r1.Visible = False
+            self.chart_r1.Invalidate()
+        elif idx == 5:
+            self._r2_entries = []
+            self.warn_r2.Visible = False
+            self.chart_r2.Invalidate()
         self.status_label.Text = "Cleared."
         self.status_label.TextColor = drawing.Colors.Gray
 
     def on_export(self, _sender, _e):
         if self._export_data is None:
-            self.status_label.Text = "Nothing to export — run Calculate on S1, S2, or S3 first."
+            self.status_label.Text = "Nothing to export — run Calculate on S1, S2, S3, or S4 first."
             self.status_label.TextColor = drawing.Colors.Orange
             return
 
@@ -1237,14 +1519,14 @@ class LinderoForm(forms.Form):
 
     def on_export_png(self, _sender, _e):
         idx = self.tabs.SelectedIndex
-        if idx == 3:
-            entries, tol, unit = self._s4_entries, self._s4_tol, self._s4_unit
-            default_name = "Lindero_S4_RoomAnalysis"
-        elif idx == 4:
-            entries, tol, unit = self._s5_entries, self._s5_tol, self._s5_unit
-            default_name = "Lindero_S5_GroupAnalysis"
+        if idx == 4:
+            entries, tol, unit = self._r1_entries, self._r1_tol, self._r1_unit
+            default_name = "Lindero_R1_RoomAnalysis"
+        elif idx == 5:
+            entries, tol, unit = self._r2_entries, self._r2_tol, self._r2_unit
+            default_name = "Lindero_R2_GroupAnalysis"
         else:
-            self.status_label.Text = "Switch to S4 or S5 tab to export a chart as PNG."
+            self.status_label.Text = "Switch to R1 or R2 tab to export a chart as PNG."
             self.status_label.TextColor = drawing.Colors.Orange
             return
 
@@ -1338,6 +1620,11 @@ class LinderoForm(forms.Form):
             "room_target_key":   self.room_target_key_dd.Text.strip(),
             "group_target_key":  self.grp_target_key_dd.Text.strip(),
             "tolerance_percent": self.tolerance_stepper.Value,
+            "s4_parent_layer":   self._selected_layer(self.parent_layer_s4_dd) or "",
+            "s4_key_sequence":   [cb.Text.strip() for cb in self._s4_key_rows],
+            "r1r2_source":       self.r1r2_source_dd.SelectedIndex,
+            "r1_level_index":    int(self.r1_level_stepper.Value),
+            "r2_level_index":    int(self.r2_level_stepper.Value),
         }
         try:
             with open(path, "w", encoding="utf-8") as f:
@@ -1358,9 +1645,30 @@ class LinderoForm(forms.Form):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-            self.room_target_key_dd.Text   = cfg.get("room_target_key", "")
-            self.grp_target_key_dd.Text    = cfg.get("group_target_key", "")
-            self.tolerance_stepper.Value   = float(cfg.get("tolerance_percent", 10.0))
+            self.room_target_key_dd.Text  = cfg.get("room_target_key", "")
+            self.grp_target_key_dd.Text   = cfg.get("group_target_key", "")
+            self.tolerance_stepper.Value  = float(cfg.get("tolerance_percent", 10.0))
+            self.r1r2_source_dd.SelectedIndex = int(cfg.get("r1r2_source", 0))
+            self.r1_level_stepper.Value   = float(cfg.get("r1_level_index", 1))
+            self.r2_level_stepper.Value   = float(cfg.get("r2_level_index", 2))
+
+            # Restore S4 parent layer
+            s4_par = cfg.get("s4_parent_layer", "")
+            if s4_par and s4_par in self.available_layers:
+                self.parent_layer_s4_dd.SelectedIndex = self.available_layers.index(s4_par)
+
+            # Restore S4 key sequence
+            key_seq = cfg.get("s4_key_sequence", [])
+            if key_seq:
+                # Clear all existing rows
+                while self._s4_keys_layout.Items.Count > 0:
+                    self._s4_keys_layout.Items.RemoveAt(0)
+                self._s4_key_rows.clear()
+                for txt in key_seq:
+                    self._s4_add_key_row(txt)
+                if not self._s4_key_rows:
+                    self._s4_add_key_row()
+
             self.status_label.Text = f"Config loaded ← {path}"
             self.status_label.TextColor = drawing.Colors.Green
         except Exception as ex:
@@ -1457,97 +1765,178 @@ class LinderoForm(forms.Form):
         self.status_label.TextColor = drawing.Colors.Green
 
     # ------------------------------------------------------------------
-    # Per-scenario runners — S4 / S5
+    # Per-scenario runner — S4
     # ------------------------------------------------------------------
 
     def _run_s4(self, unit):
-        parent = self._selected_layer(self.parent_layer_dd)
+        parent = self._selected_layer(self.parent_layer_s4_dd)
         if not parent:
-            self.status_label.Text = "S4 uses S3 Parent Layer — please select one on the S3 tab."
+            self.status_label.Text = "Please select a parent layer on the S4 tab."
             self.status_label.TextColor = drawing.Colors.Red
             return
 
-        obj_key = self.obj_key_s3.Text.strip()
-        if not obj_key:
-            self.status_label.Text = "S4 uses S3 Object Key — please set one on the S3 tab."
+        key_seq = [cb.Text.strip() for cb in self._s4_key_rows]
+        key_seq = [k for k in key_seq if k]   # drop blank entries
+        if not key_seq:
+            self.status_label.Text = "S4 requires at least one attribute key."
             self.status_label.TextColor = drawing.Colors.Orange
             return
 
-        room_target_key = self.room_target_key_dd.Text.strip()
-        tol  = self.tolerance_stepper.Value / 100.0
-        data = calc_s4(parent, obj_key, room_target_key)
+        data = calc_s4(parent, key_seq)
 
-        if not data["entries"]:
-            self.status_label.Text = "No objects found — check S3 Parent Layer setting."
+        if not data["tree"]:
+            self.results_s4.Text = f"  No objects found in any sublayer of '{parent}'.\n"
+            self.status_label.Text = "No objects found in sublayers."
             self.status_label.TextColor = drawing.Colors.Orange
             return
 
-        self._s4_entries = data["entries"]
-        self._s4_tol     = tol
-        self._s4_unit    = unit
-        n = len(data["entries"])
-        self.chart_s4.Size = drawing.Size(
-            max(400, self.chart_s4.Width),
-            max(10, n * _CHART_ROW_H + 20)
-        )
-        self.chart_s4.Invalidate()
-
-        if data["warnings"]:
-            self.warn_s4.Text    = "\n".join(data["warnings"])
-            self.warn_s4.Visible = True
-        else:
-            self.warn_s4.Visible = False
-
+        self.results_s4.Text = format_s4(data, parent, key_seq, unit)
+        self._last_s4 = data
+        self._export_data = {
+            "scenario": 4, "unit": unit,
+            "params": {"parent": parent, "key_sequence": key_seq},
+            "tree": data["tree"],
+            "overall_total": data["overall_total"],
+        }
         n_warn = len(data["warnings"])
         self.status_label.Text = (
-            f"S4  —  {n} room type(s)  |  Tolerance: {tol*100:.1f}%"
+            f"S4  —  '{short_name(parent)}'  |  "
+            f"{len(key_seq)} level(s)  |  "
+            f"Overall total: {data['overall_total']:,.4f} {unit}"
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
         self.status_label.TextColor = (
             drawing.Colors.Orange if n_warn else drawing.Colors.Green
         )
 
-    def _run_s5(self, unit):
-        parent = self._selected_layer(self.parent_layer_dd)
-        if not parent:
-            self.status_label.Text = "S5 uses S3 Parent Layer — please select one on the S3 tab."
-            self.status_label.TextColor = drawing.Colors.Red
-            return
+    # ------------------------------------------------------------------
+    # Per-scenario runners — R1 / R2
+    # ------------------------------------------------------------------
 
-        grp_key = self.grp_key_s3.Text.strip()
-        if not grp_key:
-            self.status_label.Text = "S5 uses S3 Group Key — please set one on the S3 tab."
+    def _run_r1(self, unit):
+        source_idx = self.r1r2_source_dd.SelectedIndex  # 0=S3 keys, 1=S4 hierarchy
+
+        if source_idx == 0:
+            parent  = self._selected_layer(self.parent_layer_dd)
+            obj_key = self.obj_key_s3.Text.strip()
+            if not parent:
+                self.status_label.Text = "R1 uses S3 Parent Layer — select one on the S3 tab."
+                self.status_label.TextColor = drawing.Colors.Red
+                return
+            if not obj_key:
+                self.status_label.Text = "R1 uses S3 Object Key — set one on the S3 tab."
+                self.status_label.TextColor = drawing.Colors.Orange
+                return
+        else:
+            parent  = self._selected_layer(self.parent_layer_s4_dd)
+            key_seq = [cb.Text.strip() for cb in self._s4_key_rows]
+            idx     = int(self.r1_level_stepper.Value) - 1   # 0-based
+            if not parent:
+                self.status_label.Text = "R1 uses S4 Parent Layer — select one on the S4 tab."
+                self.status_label.TextColor = drawing.Colors.Red
+                return
+            if idx < 0 or idx >= len(key_seq) or not key_seq[idx]:
+                self.status_label.Text = (
+                    f"R1: Level {idx + 1} is undefined in the S4 key sequence."
+                )
+                self.status_label.TextColor = drawing.Colors.Orange
+                return
+            obj_key = key_seq[idx]
+
+        room_target_key = self.room_target_key_dd.Text.strip()
+        tol  = self.tolerance_stepper.Value / 100.0
+        data = calc_r1(parent, obj_key, room_target_key)
+
+        if not data["entries"]:
+            self.status_label.Text = "No objects found — check parent layer setting."
             self.status_label.TextColor = drawing.Colors.Orange
             return
+
+        self._r1_entries = data["entries"]
+        self._r1_tol     = tol
+        self._r1_unit    = unit
+        n = len(data["entries"])
+        self.chart_r1.Size = drawing.Size(
+            max(400, self.chart_r1.Width),
+            max(10, n * _CHART_ROW_H + 20)
+        )
+        self.chart_r1.Invalidate()
+
+        if data["warnings"]:
+            self.warn_r1.Text    = "\n".join(data["warnings"])
+            self.warn_r1.Visible = True
+        else:
+            self.warn_r1.Visible = False
+
+        n_warn = len(data["warnings"])
+        src_tag = "S3" if source_idx == 0 else "S4"
+        self.status_label.Text = (
+            f"R1  [{src_tag}]  —  {n} room type(s)  |  Tolerance: {tol*100:.1f}%"
+            + (f"  |  {n_warn} warning(s)" if n_warn else "")
+        )
+        self.status_label.TextColor = (
+            drawing.Colors.Orange if n_warn else drawing.Colors.Green
+        )
+
+    def _run_r2(self, unit):
+        source_idx = self.r1r2_source_dd.SelectedIndex  # 0=S3 keys, 1=S4 hierarchy
+
+        if source_idx == 0:
+            parent  = self._selected_layer(self.parent_layer_dd)
+            grp_key = self.grp_key_s3.Text.strip()
+            if not parent:
+                self.status_label.Text = "R2 uses S3 Parent Layer — select one on the S3 tab."
+                self.status_label.TextColor = drawing.Colors.Red
+                return
+            if not grp_key:
+                self.status_label.Text = "R2 uses S3 Group Key — set one on the S3 tab."
+                self.status_label.TextColor = drawing.Colors.Orange
+                return
+        else:
+            parent  = self._selected_layer(self.parent_layer_s4_dd)
+            key_seq = [cb.Text.strip() for cb in self._s4_key_rows]
+            idx     = int(self.r2_level_stepper.Value) - 1   # 0-based
+            if not parent:
+                self.status_label.Text = "R2 uses S4 Parent Layer — select one on the S4 tab."
+                self.status_label.TextColor = drawing.Colors.Red
+                return
+            if idx < 0 or idx >= len(key_seq) or not key_seq[idx]:
+                self.status_label.Text = (
+                    f"R2: Level {idx + 1} is undefined in the S4 key sequence."
+                )
+                self.status_label.TextColor = drawing.Colors.Orange
+                return
+            grp_key = key_seq[idx]
 
         grp_target_key = self.grp_target_key_dd.Text.strip()
         tol  = self.tolerance_stepper.Value / 100.0
-        data = calc_s5(parent, grp_key, grp_target_key)
+        data = calc_r2(parent, grp_key, grp_target_key)
 
         if not data["entries"]:
-            self.status_label.Text = "No objects found — check S3 Parent Layer setting."
+            self.status_label.Text = "No objects found — check parent layer setting."
             self.status_label.TextColor = drawing.Colors.Orange
             return
 
-        self._s5_entries = data["entries"]
-        self._s5_tol     = tol
-        self._s5_unit    = unit
+        self._r2_entries = data["entries"]
+        self._r2_tol     = tol
+        self._r2_unit    = unit
         n = len(data["entries"])
-        self.chart_s5.Size = drawing.Size(
-            max(400, self.chart_s5.Width),
+        self.chart_r2.Size = drawing.Size(
+            max(400, self.chart_r2.Width),
             max(10, n * _CHART_ROW_H + 20)
         )
-        self.chart_s5.Invalidate()
+        self.chart_r2.Invalidate()
 
         if data["warnings"]:
-            self.warn_s5.Text    = "\n".join(data["warnings"])
-            self.warn_s5.Visible = True
+            self.warn_r2.Text    = "\n".join(data["warnings"])
+            self.warn_r2.Visible = True
         else:
-            self.warn_s5.Visible = False
+            self.warn_r2.Visible = False
 
         n_warn = len(data["warnings"])
+        src_tag = "S3" if source_idx == 0 else "S4"
         self.status_label.Text = (
-            f"S5  —  {n} group(s)  |  Tolerance: {tol*100:.1f}%"
+            f"R2  [{src_tag}]  —  {n} group(s)  |  Tolerance: {tol*100:.1f}%"
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
         self.status_label.TextColor = (
@@ -1558,17 +1947,17 @@ class LinderoForm(forms.Form):
     # Bullet chart paint handlers
     # ------------------------------------------------------------------
 
-    def _paint_s4(self, sender, e):
+    def _paint_r1(self, sender, e):
         g = e.Graphics
         w = sender.Width
-        for i, entry in enumerate(self._s4_entries):
-            _draw_bullet_row(g, i, entry, self._s4_tol, self._s4_unit, w)
+        for i, entry in enumerate(self._r1_entries):
+            _draw_bullet_row(g, i, entry, self._r1_tol, self._r1_unit, w)
 
-    def _paint_s5(self, sender, e):
+    def _paint_r2(self, sender, e):
         g = e.Graphics
         w = sender.Width
-        for i, entry in enumerate(self._s5_entries):
-            _draw_bullet_row(g, i, entry, self._s5_tol, self._s5_unit, w)
+        for i, entry in enumerate(self._r2_entries):
+            _draw_bullet_row(g, i, entry, self._r2_tol, self._r2_unit, w)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1810,6 +2199,86 @@ def _xl_s3(wb, data, unit):
                     n_cols=n_warn_cols)
 
 
+def _xl_s4(wb, data, unit):
+    """
+    S4 Custom Aggregation Excel export.
+    Sheet 'Leaf Data': flat table — one row per unique key path (leaf), with
+    one column per key level plus an area column. Useful for pivot tables.
+    Sheet 'Tree Summary': indented hierarchy showing subtotals at each node.
+    """
+    params   = data["params"]
+    parent   = params["parent"]
+    key_seq  = params["key_sequence"]
+    depth    = len(key_seq)
+    key_path = " > ".join(key_seq)
+
+    # ── Sheet 1: Leaf Data ───────────────────────────────────────────
+    ws = wb.create_sheet("Leaf Data")
+    col_widths = [22] * depth + [20]
+    _col_widths(ws, col_widths)
+    header_cols = list(key_seq) + [f"Area ({unit})"]
+    row = _hdr(ws, 1, header_cols)
+
+    def write_leaves(node, path_so_far):
+        nonlocal row
+        for val in sorted(node):
+            entry = node[val]
+            current_path = path_so_far + [val]
+            if entry["children"]:
+                write_leaves(entry["children"], current_path)
+            else:
+                # Leaf row: fill each key column
+                for ci, pv in enumerate(current_path, 1):
+                    ws.cell(row, ci, pv)
+                ws.cell(row, depth + 1, entry["area"]).number_format = _AREA_FMT
+                row += 1
+
+    write_leaves(data["tree"], [])
+
+    # ── Sheet 2: Tree Summary ────────────────────────────────────────
+    ws2 = wb.create_sheet("Tree Summary")
+    _col_widths(ws2, [52, 22])
+    row2 = _hdr(ws2, 1, ["S4 — Custom Aggregation", f"Area ({unit})"])
+
+    # Header info rows
+    for lbl, val in [("Parent Layer", parent), ("Key Hierarchy", key_path)]:
+        ws2.cell(row2, 1, lbl).font = Font(bold=True)
+        ws2.cell(row2, 2, val)
+        row2 += 1
+    row2 += 1
+
+    def write_tree_rows(node, level):
+        nonlocal row2
+        for val in sorted(node):
+            entry = node[val]
+            indent = "    " * level
+            is_leaf = not entry["children"]
+            label = f"{indent}{'▸ ' if not is_leaf else '  '}{val}"
+            lc = ws2.cell(row2, 1, label)
+            vc = ws2.cell(row2, 2, entry["area"])
+            vc.number_format = _AREA_FMT
+            if not is_leaf:
+                lc.font = Font(bold=True)
+                lc.fill = _SEC_FILL
+                vc.font = Font(bold=True)
+                vc.fill = _SEC_FILL
+            row2 += 1
+            if entry["children"]:
+                write_tree_rows(entry["children"], level + 1)
+
+    write_tree_rows(data["tree"], 0)
+    row2 += 1
+
+    # Overall total
+    lc = ws2.cell(row2, 1, "OVERALL TOTAL")
+    lc.font = _TOT_FONT
+    lc.fill = _TOT_FILL
+    vc = ws2.cell(row2, 2, data["overall_total"])
+    vc.font          = _TOT_FONT
+    vc.fill          = _TOT_FILL
+    vc.number_format = _AREA_FMT
+
+
 def export_to_excel(data, filepath):
     """Write calculation results to an Excel workbook with Objects + Summary sheets."""
     wb = openpyxl.Workbook()
@@ -1822,8 +2291,10 @@ def export_to_excel(data, filepath):
         _xl_s1(wb, data, unit)
     elif s == 2:
         _xl_s2(wb, data, unit)
-    else:
+    elif s == 3:
         _xl_s3(wb, data, unit)
+    else:
+        _xl_s4(wb, data, unit)
 
     wb.save(filepath)
 
