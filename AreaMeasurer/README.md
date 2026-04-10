@@ -1,6 +1,6 @@
 # Lindero — Footprint Area Calculator
 
-**Version:** 0.3
+**Version:** 0.4
 **Author:** Aquelon
 **Requires:** Rhino 8, CPython 3 engine (`#! python3`), `openpyxl` (auto-installed)
 
@@ -47,11 +47,39 @@ Two user text keys drive the breakdown:
 
 ---
 
-### S4 — Room Analysis
+### S4 — Custom Aggregation
 
-Aggregates individual object areas **across all floors** of the S3 parent layer, grouped by **Object Key** value. Compares each room type's total against a **Room Target Key** (set in Settings).
+User-defined hierarchy of attribute keys. You define the levels yourself — for example: `Domain → Main Group → Subgroup → Room Type`. The UI lets you add or remove levels dynamically.
 
-- Results displayed as **bullet charts**: one row per unique Object Key value.
+Per sublayer, footprints are merged within each leaf group using a **Boolean Union** (same overlap logic as S3). Leaf totals are then summed across all floors.
+
+Results are displayed as an **indented tree** in the text area:
+
+```
+  ▸ Residential                              12,450.0000
+    ▸ Housing                                 8,200.0000
+      ▸ Apartment                             5,100.0000
+          Bedroom                             2,400.0000
+          Living Room                         2,700.0000
+      ▸ Studio                                3,100.0000
+          Studio Unit                         3,100.0000
+  ▸ Commercial                               4,250.0000
+    ...
+```
+
+Each non-leaf node shows the cumulative area of all its descendants.
+
+**Using S4 as a data source for R1 / R2:** once keys are defined in S4, you can point R1 and R2 at specific levels of the S4 hierarchy using the level index steppers in Settings — instead of pulling from S3's two-key model.
+
+---
+
+### R1 — Room Analysis
+
+Aggregates individual object areas **across all floors**, grouped by a chosen key value. Compares each room type's total against a **Room Target Key** (set in Settings).
+
+Data source (configurable in Settings): **S3 keys** (default) or **S4 hierarchy** at a chosen level index.
+
+- Results displayed as **bullet charts**: one row per unique key value.
 - Each chart row shows the measured total, the target value, and the ±% deviation.
 - Colour zones on the bar indicate whether the result is within tolerance (yellow = below goal, orange = above goal).
 - Missing target keys are reported as warnings in the tab without blocking the calculation.
@@ -59,12 +87,14 @@ Aggregates individual object areas **across all floors** of the S3 parent layer,
 
 ---
 
-### S5 — Group Analysis
+### R2 — Group Analysis
 
-Same as S4 but aggregates by **Group Key** value and compares against a **Group Target Key** (set in Settings).
+Same as R1 but aggregates by a **group-level key** and compares against a **Group Target Key** (set in Settings).
 
-- Results displayed as bullet charts, one row per unique Group Key value.
-- Same warning and PNG export behaviour as S4.
+Data source (configurable in Settings): **S3 keys** (default) or **S4 hierarchy** at a chosen level index.
+
+- Results displayed as bullet charts, one row per unique group key value.
+- Same warning and PNG export behaviour as R1.
 
 ---
 
@@ -72,25 +102,38 @@ Same as S4 but aggregates by **Group Key** value and compares against a **Group 
 
 ### Program Key Mapping
 
-Defines which user text keys hold the target area values used in S4 and S5:
+Defines which user text keys hold the target area values used in R1 and R2:
 
 | Setting | Used by | Meaning |
 | --- | --- | --- |
-| Room Target Key | S4 | Attribute key whose value is the target area for that room type |
-| Group Target Key | S5 | Attribute key whose value is the target area for that group |
+| Room Target Key | R1 | Attribute key whose value is the target area for that room type |
+| Group Target Key | R2 | Attribute key whose value is the target area for that group |
 
-Dropdowns are populated from all keys present in the model, same as the Object Key and Group Key fields in S3.
+Dropdowns are populated from all keys present in the model.
 
 ### Tolerance
 
-**Global Tolerance (%)** — symmetric percentage applied to both S4 and S5 charts. Default: 10%. Range: 0–50%.
+**Global Tolerance (%)** — symmetric percentage applied to both R1 and R2 charts. Default: 10%. Range: 0–50%.
 
 A tolerance of 10% means the yellow band spans `goal × 0.90` to `goal`, and the orange band spans `goal` to `goal × 1.10`.
 
+### R1 / R2 Data Source
+
+Controls which parent layer and keys feed the R1 and R2 bullet charts:
+
+| Option | Behaviour |
+| --- | --- |
+| **S3 keys** (default) | R1 uses S3 Object Key; R2 uses S3 Group Key; parent layer from S3 tab |
+| **S4 hierarchy** | R1 and R2 pull from S4's key sequence using the level indices below |
+
+**R1 Room Level** — 1-based position in the S4 key sequence to use as the room aggregation key (default: 1).
+
+**R2 Group Level** — 1-based position in the S4 key sequence to use as the group aggregation key (default: 2).
+
 ### Configuration
 
-- **Save Config** — saves the current key mapping and tolerance to a JSON file (`lindero_config.json`).
-- **Load Config** — loads a previously saved config and populates the dropdowns and tolerance field.
+- **Save Config** — saves all settings (key mapping, tolerance, S4 key sequence, R1/R2 source) to a JSON file.
+- **Load Config** — loads a previously saved config and populates all fields.
 
 Config file structure:
 
@@ -98,15 +141,22 @@ Config file structure:
 {
   "room_target_key": "TargetArea",
   "group_target_key": "GroupTarget",
-  "tolerance_percent": 10.0
+  "tolerance_percent": 10.0,
+  "s4_parent_layer": "Building",
+  "s4_key_sequence": ["Domain", "Main Group", "Subgroup", "Room Type"],
+  "r1r2_source": 0,
+  "r1_level_index": 1,
+  "r2_level_index": 2
 }
 ```
+
+`r1r2_source`: `0` = S3 keys, `1` = S4 hierarchy.
 
 ---
 
 ## Bullet chart legend
 
-Each row in S4/S5 is drawn as follows (left to right):
+Each row in R1/R2 is drawn as follows (left to right):
 
 ```
 [Room label]  ░░░░▓▓▓[████████████]░░░▓▓▓░░░░   87.5/100.0
@@ -143,20 +193,29 @@ Status bar confirms: `Area written to N object(s) using key 'Area'`.
 
 ## Export to Excel
 
-Available for S1, S2, and S3. The workbook contains two sheets:
+Available for S1, S2, S3, and S4.
+
+**S1, S2, S3** workbooks contain two sheets:
 
 | Sheet | Contents |
 | --- | --- |
 | **Objects** | One row per measured object with GUID, layer/level, key values, and footprint area |
 | **Summary** | Scenario parameters, totals, group breakdowns, and any overlap warnings |
 
-Overlap warnings are highlighted in amber in the Summary sheet.
+**S4** workbooks contain two sheets:
+
+| Sheet | Contents |
+| --- | --- |
+| **Leaf Data** | Flat table — one row per unique key path (leaf), with one column per key level plus area. Useful for pivot tables. |
+| **Tree Summary** | Indented hierarchy showing the cumulative area at each node, matching the text area output. |
+
+Overlap warnings are highlighted in amber in Summary sheets.
 
 ---
 
 ## Export Chart as PNG
 
-Available when the S4 or S5 tab is active. Renders the full bullet chart to a 900 px wide PNG file at the path you choose. The chart height scales automatically with the number of entries (54 px per row).
+Available when the R1 or R2 tab is active. Renders the full bullet chart to a 900 px wide PNG file at the path you choose. The chart height scales automatically with the number of entries (54 px per row).
 
 ---
 
@@ -218,7 +277,7 @@ A future fix would replace the bottom-face method with a true top-down silhouett
 
 ---
 
-## Overlap removal (S2 and S3)
+## Overlap removal (S2, S3, and S4)
 
 Projected footprint curves are passed to `Rhino.Geometry.Curve.CreateBooleanUnion()` at the model's absolute tolerance. If the Boolean Union fails, the tool falls back to a plain sum and marks the result with `[union failed — sum shown]`.
 
@@ -233,5 +292,5 @@ Click **Refresh Model** to re-scan all layers and user text keys and update ever
 ## To-Do
 
 - Silhouette-based footprint for Case B2 (cantilever / overhang solids).
-- Excel export for S4 and S5 (room/group analysis results with target comparison).
-- Highlight out-of-tolerance objects in the Rhino viewport from S4/S5.
+- Highlight out-of-tolerance objects in the Rhino viewport from R1/R2.
+- Excel export for R1/R2 (room/group analysis results with target comparison).
