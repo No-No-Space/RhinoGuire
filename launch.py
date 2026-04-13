@@ -1,32 +1,30 @@
+#! python3
 """
 RhinoGuire - Script Launcher
-Used by toolbar buttons. Pass the script key as argument.
+Resolves all script paths relative to this file's location.
+No install step required — works out of the box after cloning.
 
-Button macro example:
-  ! _RunPythonScript "D:/path/to/RhinoGuire/launch.py" "RG_Lindero"
+Button macro: ! _-RunPythonScript "D:/path/to/RhinoGuire/launch_lindero.py"
 """
-
-import scriptcontext as sc
-import rhinoscriptsyntax as rs
-import sys
 import os
+import rhinoscriptsyntax as rs
 
-def launch(script_key):
-    path = sc.sticky.get(script_key)
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+SCRIPTS = {
+    "Lindero":  os.path.join(_ROOT, "AreaMeasurer",        "Lindero.py"),
+    "Arriero":  os.path.join(_ROOT, "DataExporterImporter", "Arriero.py"),
+    "Chivito":  os.path.join(_ROOT, "DataVisualization",   "Chivito.py"),
+    "Sebucan":  os.path.join(_ROOT, "MeshTools",           "WrapeMeshOnMesh", "Sebucan.py"),
+    "Baquiano": os.path.join(_ROOT, "SearchData",          "Baquiano.py"),
+}
+
+def launch(key):
+    path = SCRIPTS.get(key)
     if not path:
-        rs.MessageBox(
-            f"Script '{script_key}' not found.\n\nRun install.py first:\n"
-            "_RunPythonScript path/to/RhinoGuire/install.py",
-            title="RhinoGuire"
-        )
+        rs.MessageBox("Unknown script key: " + key, title="RhinoGuire")
         return
     if not os.path.exists(path):
-        rs.MessageBox(f"Script file not found:\n{path}", title="RhinoGuire")
+        rs.MessageBox("Script file not found:\n" + path, title="RhinoGuire")
         return
-
-    exec(open(path).read(), {"__file__": path})
-
-# Called from macro with argument
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        launch(sys.argv[1])
+    exec(open(path, encoding="utf-8").read(), {"__file__": path, "__name__": "__main__"})

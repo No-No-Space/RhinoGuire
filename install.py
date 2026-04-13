@@ -1,9 +1,12 @@
+#! python3
 """
 RhinoGuire - Installer / Path Setup
-Run this script once from Rhino Python editor to register the script paths.
 
-Example (adjust to your local path):
-  _RunPythonScript "<path-to-repo>/RhinoGuire/install.py"
+DEPRECATED: install.py is no longer needed.
+launch.py now resolves all script paths relative to its own location,
+so the toolbar buttons work out of the box after cloning the repo.
+
+This file is kept only for reference and can be safely deleted.
 """
 
 import rhinoscriptsyntax as rs
@@ -39,7 +42,7 @@ else:
     rs.MessageBox(
         "RhinoGuire installed successfully!\n\n" +
         "Scripts registered:\n" +
-        "\n".join([f"  {k}" for k in SCRIPTS.keys()]) +
+        "\n".join(["  " + k for k in SCRIPTS.keys()]) +
         "\n\nYou can now load the toolbar from:\n" +
         "Tools > Toolbar Layout > Open > RhinoGuire/ui/RhinoGuire.rui",
         title="RhinoGuire"
