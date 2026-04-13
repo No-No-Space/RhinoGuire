@@ -22,7 +22,7 @@ SCRIPTS = {
     "RG_Lindero":   os.path.join(RHINOGUIRE_ROOT, "AreaMeasurer",        "Lindero.py"),
     "RG_Arriero":   os.path.join(RHINOGUIRE_ROOT, "DataExporterImporter", "Arriero.py"),
     "RG_Chivito":   os.path.join(RHINOGUIRE_ROOT, "DataVisualization",   "Chivito.py"),
-    "RG_Sebucan":   os.path.join(RHINOGUIRE_ROOT, "MeshTools",           "WrapeMeshOnMesh", "Sebucan.py"),
+    "RG_Sebucan":   os.path.join(RHINOGUIRE_ROOT, "MeshTools",           "WrapMeshOnMesh", "Sebucan.py"),
     "RG_Baquiano":  os.path.join(RHINOGUIRE_ROOT, "SearchData",          "Baquiano.py"),
 }
 

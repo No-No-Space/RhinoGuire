@@ -15,7 +15,7 @@ SCRIPTS = {
     "Lindero":  os.path.join(_ROOT, "AreaMeasurer",        "Lindero.py"),
     "Arriero":  os.path.join(_ROOT, "DataExporterImporter", "Arriero.py"),
     "Chivito":  os.path.join(_ROOT, "DataVisualization",   "Chivito.py"),
-    "Sebucan":  os.path.join(_ROOT, "MeshTools",           "WrapeMeshOnMesh", "Sebucan.py"),
+    "Sebucan":  os.path.join(_ROOT, "MeshTools",           "WrapMeshOnMesh", "Sebucan.py"),
     "Baquiano": os.path.join(_ROOT, "SearchData",          "Baquiano.py"),
 }
 
