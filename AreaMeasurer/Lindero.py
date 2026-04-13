@@ -168,7 +168,7 @@ def _brep_footprint_curves(brep):
         return [rg.PolylineCurve(pts)]
 
     min_z = min(z for _, z in horiz)
-    bottom = [f for f, z in horiz if abs(z - min_z) <= tol * 100]
+    bottom = [f for f, z in horiz if abs(z - min_z) <= tol * 2]
 
     curves = []
     for face in bottom:
@@ -384,28 +384,32 @@ def calc_s4(parent_layer, key_sequence):
 def calc_r1(parent_layer, obj_key, room_target_key):
     """
     R1 — Room Analysis.
-    Sums individual footprint areas across all sublayers, grouped by obj_key value.
+    Per floor, merges footprints within each obj_key group (Boolean Union) to
+    remove same-key overlaps, then sums merged areas across all floors.
     Compares each group total to room_target_key.
     Returns {entries: [{label, measured, goal}], warnings: [str]}.
     """
-    buckets = {}
+    area_by_key = {}   # {nv: cumulative merged area across floors}
+    all_guids   = {}   # {nv: [all guids]} — for target-key lookup only
+
     for sl in get_child_layers(parent_layer):
+        floor_groups = {}
         for guid in (get_layer_objects(sl) or []):
             nv = (rs.GetUserText(guid, obj_key) if obj_key else None)
             if not nv:
                 nv = rs.ObjectName(guid) or (str(guid)[:8] + "…")
-            area = get_footprint_area(guid)
-            if nv not in buckets:
-                buckets[nv] = {"area": area, "guids": [guid]}
-            else:
-                buckets[nv]["area"] += area
-                buckets[nv]["guids"].append(guid)
+            floor_groups.setdefault(nv, []).append(guid)
+            all_guids.setdefault(nv, []).append(guid)
+
+        for nv, guids in floor_groups.items():
+            area, _ = combined_area(guids)
+            area_by_key[nv] = area_by_key.get(nv, 0.0) + area
 
     entries, warnings = [], []
-    for nv, bkt in sorted(buckets.items()):
+    for nv in sorted(area_by_key):
         goal = None
         if room_target_key:
-            for guid in bkt["guids"]:
+            for guid in all_guids.get(nv, []):
                 raw = rs.GetUserText(guid, room_target_key)
                 if raw:
                     try:
@@ -415,7 +419,7 @@ def calc_r1(parent_layer, obj_key, room_target_key):
                         pass
             if goal is None:
                 warnings.append(f"[!] Room Target Key '{room_target_key}' not found on '{nv}'")
-        entries.append({"label": nv, "measured": bkt["area"], "goal": goal})
+        entries.append({"label": nv, "measured": area_by_key[nv], "goal": goal})
 
     return {"entries": entries, "warnings": warnings}
 
@@ -423,26 +427,30 @@ def calc_r1(parent_layer, obj_key, room_target_key):
 def calc_r2(parent_layer, grp_key, grp_target_key):
     """
     R2 — Group Analysis.
-    Sums individual footprint areas across all sublayers, grouped by grp_key value.
+    Per floor, merges footprints within each grp_key group (Boolean Union) to
+    remove same-key overlaps, then sums merged areas across all floors.
     Compares each group total to grp_target_key.
     Returns {entries: [{label, measured, goal}], warnings: [str]}.
     """
-    buckets = {}
+    area_by_key = {}   # {nv: cumulative merged area across floors}
+    all_guids   = {}   # {nv: [all guids]} — for target-key lookup only
+
     for sl in get_child_layers(parent_layer):
+        floor_groups = {}
         for guid in (get_layer_objects(sl) or []):
             nv = (rs.GetUserText(guid, grp_key) if grp_key else None) or "—"
-            area = get_footprint_area(guid)
-            if nv not in buckets:
-                buckets[nv] = {"area": area, "guids": [guid]}
-            else:
-                buckets[nv]["area"] += area
-                buckets[nv]["guids"].append(guid)
+            floor_groups.setdefault(nv, []).append(guid)
+            all_guids.setdefault(nv, []).append(guid)
+
+        for nv, guids in floor_groups.items():
+            area, _ = combined_area(guids)
+            area_by_key[nv] = area_by_key.get(nv, 0.0) + area
 
     entries, warnings = [], []
-    for nv, bkt in sorted(buckets.items()):
+    for nv in sorted(area_by_key):
         goal = None
         if grp_target_key:
-            for guid in bkt["guids"]:
+            for guid in all_guids.get(nv, []):
                 raw = rs.GetUserText(guid, grp_target_key)
                 if raw:
                     try:
@@ -452,7 +460,7 @@ def calc_r2(parent_layer, grp_key, grp_target_key):
                         pass
             if goal is None:
                 warnings.append(f"[!] Group Target Key '{grp_target_key}' not found on '{nv}'")
-        entries.append({"label": nv, "measured": bkt["area"], "goal": goal})
+        entries.append({"label": nv, "measured": area_by_key[nv], "goal": goal})
 
     return {"entries": entries, "warnings": warnings}
 

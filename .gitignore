@@ -179,7 +179,7 @@ DataVisualization/_ExcelOutput/
 *.rui.bak
 
 # Local toolbar with hardcoded paths — commit only RhinoGuire.rui.template
-# ui/RhinoGuire.rui
+ui/RhinoGuire.rui
 
 # Cursor  
 #  Cursor is an AI-powered code editor.`.cursorignore` specifies files/directories to 
