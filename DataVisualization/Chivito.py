@@ -54,6 +54,12 @@ import Eto.Forms as forms
 # Import System.Drawing for PNG export
 import System.Drawing as sdrawing
 
+import sys as _sys, os as _os
+_rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
+if _rg_root not in _sys.path:
+    _sys.path.insert(0, _rg_root)
+from ui import theme as _t
+
 
 # ============================================================================
 # SCRIPT 01 FUNCTIONS - Read keys from Excel and apply to objects
@@ -360,6 +366,7 @@ class ColorManagerDialog(forms.Form):
 
         self.Title = "Color Manager"
         self.Padding = drawing.Padding(10)
+        self.BackgroundColor = _t.BG
         self.Resizable   = True
         self.MinimumSize = drawing.Size(480, 540)
         self.ClientSize  = drawing.Size(520, 640)
@@ -399,7 +406,7 @@ class ColorManagerDialog(forms.Form):
 
         self.legend_panel = forms.Panel()
         self.legend_panel.Size = drawing.Size(450, 200)
-        self.legend_panel.BackgroundColor = drawing.Colors.White
+        self.legend_panel.BackgroundColor = _t.PANEL
         self.update_legend()
 
         self.warnings_label = forms.Label()
@@ -407,31 +414,45 @@ class ColorManagerDialog(forms.Form):
 
         self.warnings_text = forms.TextArea()
         self.warnings_text.ReadOnly = True
+        self.warnings_text.Font = _t.F_MONO
+        self.warnings_text.BackgroundColor = _t.PANEL
         self.warnings_text.Size = drawing.Size(450, 100)
         self.warnings_text.Text = "Click 'Update Colors' to analyze..."
 
         self.update_button = forms.Button()
         self.update_button.Text = "Update Colors"
+        self.update_button.Font = _t.F_SANS_B
+        self.update_button.BackgroundColor = _t.BTN_CALC
         self.update_button.Click += self.on_update_clicked
 
         self.select_button = forms.Button()
         self.select_button.Text = "Select Problem Objects"
+        self.select_button.Font = _t.F_SANS_B
+        self.select_button.BackgroundColor = _t.BTN_DEFAULT
         self.select_button.Click += self.on_select_clicked
         self.select_button.Enabled = False
 
         self.export_legend_button = forms.Button()
         self.export_legend_button.Text = "Export Legend as PNG"
+        self.export_legend_button.Font = _t.F_SANS_B
+        self.export_legend_button.BackgroundColor = _t.BTN_DEFAULT
         self.export_legend_button.Click += self.on_export_legend_clicked
 
         self.capture_viewport_button = forms.Button()
         self.capture_viewport_button.Text = "Capture Viewport as PNG"
+        self.capture_viewport_button.Font = _t.F_SANS_B
+        self.capture_viewport_button.BackgroundColor = _t.BTN_DEFAULT
         self.capture_viewport_button.Click += self.on_capture_viewport_clicked
 
         self.close_button = forms.Button()
         self.close_button.Text = "Close"
+        self.close_button.Font = _t.F_SANS_B
+        self.close_button.BackgroundColor = _t.BTN_CLEAR
         self.close_button.Click += self.on_close_clicked
 
         self.status_label = forms.Label()
+        self.status_label.Font = _t.F_SANS
+        self.status_label.TextColor = _t.TEXT_MUTED
         self.status_label.Text = f"Ready - {len(self.objects)} objects"
 
     def create_layout(self):
@@ -468,7 +489,7 @@ class ColorManagerDialog(forms.Form):
 
         title = forms.Label()
         title.Text = self.active_key
-        title.Font = drawing.Font(drawing.SystemFont.Bold, 12)
+        title.Font = _t.F_HEAD
         legend_layout.AddRow(title)
         legend_layout.AddRow(None)
 
@@ -486,8 +507,8 @@ class ColorManagerDialog(forms.Form):
             rgb_text = f"RGB: {color_rgb[0]},{color_rgb[1]},{color_rgb[2]}"
             rgb_label = forms.Label()
             rgb_label.Text = rgb_text
-            rgb_label.Font = drawing.Font(drawing.SystemFont.Default, 9)
-            rgb_label.TextColor = drawing.Colors.Gray
+            rgb_label.Font = _t.F_SANS_S
+            rgb_label.TextColor = _t.TEXT_MUTED
 
             row_layout = forms.DynamicLayout()
             row_layout.Spacing = drawing.Size(5, 5)
@@ -703,6 +724,7 @@ class DataVisualizationTool(forms.Form):
 
         self.Title = "Data Visualization Tool (Excel)"
         self.Padding = drawing.Padding(15)
+        self.BackgroundColor = _t.BG
         self.Resizable   = True
         self.MinimumSize = drawing.Size(420, 400)
         self.ClientSize  = drawing.Size(480, 480)
@@ -714,50 +736,59 @@ class DataVisualizationTool(forms.Form):
     def create_controls(self):
         self.header = forms.Label()
         self.header.Text = "Rhino Metadata Visualization"
-        self.header.Font = drawing.Font(drawing.SystemFont.Bold, 12)
+        self.header.Font = _t.F_HEAD
 
         self.step1_label = forms.Label()
         self.step1_label.Text = "Step 1: Initialize Keys"
-        self.step1_label.Font = drawing.Font(drawing.SystemFont.Bold, 10)
+        self.step1_label.Font = _t.F_SANS_B
 
         self.step1_desc = forms.Label()
         self.step1_desc.Text = "Apply metadata keys from Excel to objects"
-        self.step1_desc.TextColor = drawing.Colors.Gray
+        self.step1_desc.TextColor = _t.TEXT_MUTED
 
         self.step1_button = forms.Button()
         self.step1_button.Text = "Select Excel & Apply Keys"
+        self.step1_button.Font = _t.F_SANS_B
+        self.step1_button.BackgroundColor = _t.BTN_CALC
         self.step1_button.Click += self.on_step1
 
         self.step2_label = forms.Label()
         self.step2_label.Text = "Step 2: Extract Unique Values"
-        self.step2_label.Font = drawing.Font(drawing.SystemFont.Bold, 10)
+        self.step2_label.Font = _t.F_SANS_B
 
         self.step2_desc = forms.Label()
         self.step2_desc.Text = "Scan objects and generate color Excel"
-        self.step2_desc.TextColor = drawing.Colors.Gray
+        self.step2_desc.TextColor = _t.TEXT_MUTED
 
         self.step2_button = forms.Button()
         self.step2_button.Text = "Scan & Generate Excel"
+        self.step2_button.Font = _t.F_SANS_B
+        self.step2_button.BackgroundColor = _t.BTN_DEFAULT
         self.step2_button.Click += self.on_step2
 
         self.step3_label = forms.Label()
         self.step3_label.Text = "Step 3: Visualize with Colors"
-        self.step3_label.Font = drawing.Font(drawing.SystemFont.Bold, 10)
+        self.step3_label.Font = _t.F_SANS_B
 
         self.step3_desc = forms.Label()
         self.step3_desc.Text = "Interactive color visualization"
-        self.step3_desc.TextColor = drawing.Colors.Gray
+        self.step3_desc.TextColor = _t.TEXT_MUTED
 
         self.step3_button = forms.Button()
         self.step3_button.Text = "Open Color Manager"
+        self.step3_button.Font = _t.F_SANS_B
+        self.step3_button.BackgroundColor = _t.BTN_DEFAULT
         self.step3_button.Click += self.on_step3
 
         self.status = forms.Label()
         self.status.Text = "Ready"
-        self.status.TextColor = drawing.Colors.Blue
+        self.status.Font = _t.F_SANS
+        self.status.TextColor = _t.TEXT_MUTED
 
         self.close_button = forms.Button()
         self.close_button.Text = "Close"
+        self.close_button.Font = _t.F_SANS_B
+        self.close_button.BackgroundColor = _t.BTN_CLEAR
         self.close_button.Click += self.on_close
 
     def create_layout(self):

@@ -62,6 +62,12 @@ from openpyxl.utils import get_column_letter
 import json
 import System
 
+import sys as _sys, os as _os
+_rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
+if _rg_root not in _sys.path:
+    _sys.path.insert(0, _rg_root)
+from ui import theme as _t
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Model helpers
@@ -187,29 +193,33 @@ def _brep_footprint_curves(brep):
 def get_footprint_curves(obj_guid):
     """
     Return a list of planar closed curves at Z=0 representing the footprint
-    of the object. Returns an empty list if the footprint cannot be determined.
+    of the object. Returns an empty list if the footprint cannot be determined
+    or if the geometry type is unsupported / raises an exception.
     """
-    rhobj = sc.doc.Objects.FindId(obj_guid)
-    if rhobj is None:
+    try:
+        rhobj = sc.doc.Objects.FindId(obj_guid)
+        if rhobj is None:
+            return []
+        geom = rhobj.Geometry
+
+        if isinstance(geom, (rg.Extrusion, rg.Surface)):
+            brep = geom.ToBrep()
+            if brep:
+                return _brep_footprint_curves(brep)
+
+        if isinstance(geom, rg.Brep):
+            return _brep_footprint_curves(geom)
+
+        if isinstance(geom, rg.Curve) and geom.IsClosed and geom.IsPlanar():
+            proj = rg.Transform.PlanarProjection(rg.Plane.WorldXY)
+            dup = geom.DuplicateCurve()
+            dup.Transform(proj)
+            return [dup]
+
+        fallback = _bbox_footprint(obj_guid)
+        return [fallback] if fallback else []
+    except Exception:
         return []
-    geom = rhobj.Geometry
-
-    if isinstance(geom, (rg.Extrusion, rg.Surface)):
-        brep = geom.ToBrep()
-        if brep:
-            return _brep_footprint_curves(brep)
-
-    if isinstance(geom, rg.Brep):
-        return _brep_footprint_curves(geom)
-
-    if isinstance(geom, rg.Curve) and geom.IsClosed and geom.IsPlanar():
-        proj = rg.Transform.PlanarProjection(rg.Plane.WorldXY)
-        dup = geom.DuplicateCurve()
-        dup.Transform(proj)
-        return [dup]
-
-    fallback = _bbox_footprint(obj_guid)
-    return [fallback] if fallback else []
 
 
 def curve_area(curve):
@@ -276,12 +286,20 @@ def calc_s1(name_key):
 def calc_s2(layer_name, obj_key):
     """
     Scenario 2 — All objects on one layer, footprints merged.
-    Returns {objects, total, union_ok}.
+    Returns {objects, total, union_ok, skipped}.
+    skipped: number of objects with no calculable footprint (unsupported type).
     """
     guids = get_layer_objects(layer_name)
-    per_obj = [{"guid": str(g), "name": _label(g, obj_key), "area": get_footprint_area(g)} for g in guids]
+    per_obj = []
+    skipped = 0
+    for g in guids:
+        curves = get_footprint_curves(g)
+        if not curves:
+            skipped += 1
+        area = sum(curve_area(c) for c in curves)
+        per_obj.append({"guid": str(g), "name": _label(g, obj_key), "area": area})
     total, union_ok = combined_area(guids)
-    return {"objects": per_obj, "total": total, "union_ok": union_ok}
+    return {"objects": per_obj, "total": total, "union_ok": union_ok, "skipped": skipped}
 
 
 def calc_s3(parent_layer, obj_key, grp_key):
@@ -300,13 +318,17 @@ def calc_s3(parent_layer, obj_key, grp_key):
 
         objects = []
         groups = {}
+        skipped = 0
         for guid in guids:
+            curves = get_footprint_curves(guid)
+            if not curves:
+                skipped += 1
             grp_val = (rs.GetUserText(guid, grp_key) if grp_key else None) or "—"
             objects.append({
                 "guid": str(guid),
                 "name": _label(guid, obj_key),
                 "group": grp_val,
-                "area": get_footprint_area(guid),
+                "area": sum(curve_area(c) for c in curves),
             })
             groups.setdefault(grp_val, []).append(guid)
 
@@ -318,6 +340,7 @@ def calc_s3(parent_layer, obj_key, grp_key):
             "group_totals": group_totals,
             "total": total,
             "union_ok": union_ok,
+            "skipped": skipped,
         }
         result["overall_total"] += total
 
@@ -530,6 +553,12 @@ def format_s2(data, layer_name, obj_key, unit):
             "      Some objects share footprint area.",
             "      Verify whether double-counting is intentional.",
         ]
+    if data.get("skipped", 0) > 0:
+        lines += [
+            _rule("─"),
+            f"  [!] {data['skipped']} object(s) had no calculable footprint",
+            "      and were skipped (e.g. points, text, annotations).",
+        ]
     lines += [_rule(), ""]
     return "\n".join(lines)
 
@@ -591,6 +620,12 @@ def format_s3(data, parent_layer, obj_key, grp_key, unit):
                 lines.append(_row("      of which cross-group overlap", _fmt(cross_group_overlap)))
             lines.append("      Some objects share footprint area.")
             lines.append("      Verify whether double-counting is intentional.")
+        if sl_data.get("skipped", 0) > 0:
+            lines += [
+                _rule("─"),
+                f"  [!] {sl_data['skipped']} object(s) had no calculable footprint",
+                "      and were skipped (e.g. points, text, annotations).",
+            ]
         lines.append("")
 
     lines += [
@@ -662,10 +697,9 @@ def _draw_bullet_row(g, i, entry, tol, unit, total_w):
 
     font    = drawing.Font("Arial", 8)
     sm_font = drawing.Font("Arial", 7)
-    c_black = _rgb(0, 0, 0)
 
     # Left label (truncated)
-    g.DrawText(font, c_black,
+    g.DrawText(font, _t.CHART_LABEL,
                drawing.PointF(4.0, float(y0 + (_CHART_ROW_H - 12) // 2)),
                label[:17])
 
@@ -678,7 +712,7 @@ def _draw_bullet_row(g, i, entry, tol, unit, total_w):
         return
 
     if goal is None or goal <= 0:
-        g.DrawText(font, _rgb(160, 60, 60),
+        g.DrawText(font, _t.CHART_NOTGT,
                    drawing.PointF(chart_x + 4.0, bar_y),
                    f"{meas:,.2f} (no target)")
         return
@@ -690,39 +724,39 @@ def _draw_bullet_row(g, i, entry, tol, unit, total_w):
     def px(v):
         return chart_x + float(v) / max_val * chart_w
 
-    # 1. Grey background
-    g.FillRectangle(_rgb(215, 215, 215),
+    # 1. Background bar
+    g.FillRectangle(_t.CHART_BG,
                     drawing.RectangleF(chart_x, bar_y, chart_w, bar_h))
 
-    # 2. Yellow zone: goal*(1-tol) → goal
+    # 2. Below-target zone: goal*(1-tol) → goal
     yl = px(max(0.0, goal * (1.0 - tol)))
     yr = px(goal)
     if yr > yl:
-        g.FillRectangle(_rgb(255, 235, 100),
+        g.FillRectangle(_t.CHART_LOW,
                         drawing.RectangleF(yl, bar_y, yr - yl, bar_h))
 
-    # 3. Orange zone: goal → goal*(1+tol)
+    # 3. Above-target zone: goal → goal*(1+tol)
     ol  = px(goal)
     or_ = px(min(max_val, goal * (1.0 + tol)))
     if or_ > ol:
-        g.FillRectangle(_rgb(255, 180, 70),
+        g.FillRectangle(_t.CHART_HIGH,
                         drawing.RectangleF(ol, bar_y, or_ - ol, bar_h))
 
     # 4. Measured bar
     mx = px(meas) - chart_x
     if mx > 0:
-        g.FillRectangle(_rgb(70, 100, 145),
+        g.FillRectangle(_t.CHART_BAR,
                         drawing.RectangleF(chart_x, bar_y,
                                            min(float(mx), chart_w), bar_h))
 
     # 5. Goal line (2 px)
     gx = px(goal)
-    g.DrawLine(drawing.Pen(_rgb(30, 30, 30), 2.0),
+    g.DrawLine(drawing.Pen(_t.CHART_GOAL, 2.0),
                drawing.PointF(gx, bar_y - 2.0),
                drawing.PointF(gx, bar_y + bar_h + 2.0))
 
     # 6. Tolerance marker lines
-    tpen = drawing.Pen(_rgb(120, 120, 120), 1.0)
+    tpen = drawing.Pen(_t.CHART_TOL, 1.0)
     for tx in (px(goal * (1.0 - tol)), px(goal * (1.0 + tol))):
         if chart_x <= tx <= chart_x + chart_w:
             g.DrawLine(tpen,
@@ -733,10 +767,10 @@ def _draw_bullet_row(g, i, entry, tol, unit, total_w):
     delta = (meas - goal) / goal * 100.0
     sign  = "+" if delta >= 0 else ""
     vx    = float(total_w - _CHART_VALUE_W + 4)
-    g.DrawText(font,    c_black,
+    g.DrawText(font,    _t.CHART_LABEL,
                drawing.PointF(vx, bar_y - 1.0),
                f"{meas:,.1f}/{goal:,.1f}")
-    g.DrawText(sm_font, _rgb(80, 80, 80),
+    g.DrawText(sm_font, _t.CHART_DELTA,
                drawing.PointF(vx, bar_y + 11.0),
                f"{sign}{delta:.1f}%  [{unit}]")
 
@@ -772,6 +806,7 @@ class LinderoForm(forms.Form):
         self.Resizable = True
         self.MinimumSize = drawing.Size(480, 540)
         self.ClientSize  = drawing.Size(680, 720)
+        self.BackgroundColor = _t.BG
         self.Owner = Rhino.UI.RhinoEtoApp.MainWindow
 
         self.available_keys   = get_all_user_text_keys()
@@ -822,26 +857,38 @@ class LinderoForm(forms.Form):
 
         calc_btn = forms.Button()
         calc_btn.Text = "Calculate"
+        calc_btn.Font = _t.F_SANS_B
+        calc_btn.BackgroundColor = _t.BTN_CALC
         calc_btn.Click += self.on_calculate
 
         clear_btn = forms.Button()
         clear_btn.Text = "Clear"
+        clear_btn.Font = _t.F_SANS_B
+        clear_btn.BackgroundColor = _t.BTN_CLEAR
         clear_btn.Click += self.on_clear
 
         refresh_btn = forms.Button()
         refresh_btn.Text = "Refresh Model"
+        refresh_btn.Font = _t.F_SANS_B
+        refresh_btn.BackgroundColor = _t.BTN_DEFAULT
         refresh_btn.Click += self.on_refresh_model
 
         export_btn = forms.Button()
         export_btn.Text = "Export to Excel"
+        export_btn.Font = _t.F_SANS_B
+        export_btn.BackgroundColor = _t.BTN_DEFAULT
         export_btn.Click += self.on_export
 
         write_btn = forms.Button()
         write_btn.Text = "Write Area to Objects"
+        write_btn.Font = _t.F_SANS_B
+        write_btn.BackgroundColor = _t.BTN_DEFAULT
         write_btn.Click += self.on_write_area_toggle
 
         png_btn = forms.Button()
         png_btn.Text = "Export Chart as PNG"
+        png_btn.Font = _t.F_SANS_B
+        png_btn.BackgroundColor = _t.BTN_DEFAULT
         png_btn.Click += self.on_export_png
 
         btn_row.Items.Add(forms.StackLayoutItem(calc_btn))
@@ -861,7 +908,8 @@ class LinderoForm(forms.Form):
             f"Ready  —  {len(self.available_layers)} layer(s), "
             f"{len(self.available_keys)} key(s) loaded."
         )
-        self.status_label.TextColor = drawing.Colors.Gray
+        self.status_label.Font = _t.F_SANS
+        self.status_label.TextColor = _t.TEXT_MUTED
         outer.Items.Add(forms.StackLayoutItem(self.status_label))
 
         self.Content = outer
@@ -883,10 +931,14 @@ class LinderoForm(forms.Form):
 
         confirm_btn = forms.Button()
         confirm_btn.Text = "Confirm Write"
+        confirm_btn.Font = _t.F_SANS_B
+        confirm_btn.BackgroundColor = _t.BTN_CALC
         confirm_btn.Click += self.on_confirm_write
 
         cancel_btn = forms.Button()
         cancel_btn.Text = "Cancel"
+        cancel_btn.Font = _t.F_SANS_B
+        cancel_btn.BackgroundColor = _t.BTN_CLEAR
         cancel_btn.Click += self._on_write_cancel
 
         self._write_panel.Items.Add(forms.StackLayoutItem(wk_lbl))
@@ -910,7 +962,7 @@ class LinderoForm(forms.Form):
 
         desc = forms.Label()
         desc.Text = "Individual footprint per selected object. No overlap handling."
-        desc.TextColor = drawing.Colors.Gray
+        desc.TextColor = _t.TEXT_MUTED
         controls.AddRow(desc)
         controls.AddRow(None)
 
@@ -925,12 +977,13 @@ class LinderoForm(forms.Form):
 
         note = forms.Label()
         note.Text = "Select objects in Rhino (form stays open), then click Calculate."
-        note.TextColor = drawing.Colors.Gray
+        note.TextColor = _t.TEXT_MUTED
         controls.AddRow(note)
 
         self.results_s1 = forms.TextArea()
         self.results_s1.ReadOnly = True
-        self.results_s1.Font = drawing.Font("Courier New", 9)
+        self.results_s1.Font = _t.F_MONO
+        self.results_s1.BackgroundColor = _t.PANEL
         self.results_s1.Text = "Select objects and click Calculate.\n"
 
         layout = forms.StackLayout()
@@ -952,7 +1005,7 @@ class LinderoForm(forms.Form):
 
         desc = forms.Label()
         desc.Text = "All objects on a layer. Overlapping footprints merged (Boolean Union)."
-        desc.TextColor = drawing.Colors.Gray
+        desc.TextColor = _t.TEXT_MUTED
         controls.AddRow(desc)
         controls.AddRow(None)
 
@@ -973,7 +1026,8 @@ class LinderoForm(forms.Form):
 
         self.results_s2 = forms.TextArea()
         self.results_s2.ReadOnly = True
-        self.results_s2.Font = drawing.Font("Courier New", 9)
+        self.results_s2.Font = _t.F_MONO
+        self.results_s2.BackgroundColor = _t.PANEL
         self.results_s2.Text = "Select a layer and click Calculate.\n"
 
         layout = forms.StackLayout()
@@ -995,7 +1049,7 @@ class LinderoForm(forms.Form):
 
         desc = forms.Label()
         desc.Text = "Parent layer + sublayers (each sublayer = one level / floor)."
-        desc.TextColor = drawing.Colors.Gray
+        desc.TextColor = _t.TEXT_MUTED
         controls.AddRow(desc)
         controls.AddRow(None)
 
@@ -1015,7 +1069,7 @@ class LinderoForm(forms.Form):
         self.obj_key_s3.Width = 300
         obj_key_hint = forms.Label()
         obj_key_hint.Text = "Individual or small group name (e.g. 'Room Name')"
-        obj_key_hint.TextColor = drawing.Colors.Gray
+        obj_key_hint.TextColor = _t.TEXT_MUTED
         controls.AddRow(obj_key_lbl, self.obj_key_s3)
         controls.AddRow(None, obj_key_hint)
         controls.AddRow(None)
@@ -1028,13 +1082,14 @@ class LinderoForm(forms.Form):
         self.grp_key_s3.Width = 300
         grp_key_hint = forms.Label()
         grp_key_hint.Text = "Larger class grouping (e.g. 'Department')"
-        grp_key_hint.TextColor = drawing.Colors.Gray
+        grp_key_hint.TextColor = _t.TEXT_MUTED
         controls.AddRow(grp_key_lbl, self.grp_key_s3)
         controls.AddRow(None, grp_key_hint)
 
         self.results_s3 = forms.TextArea()
         self.results_s3.ReadOnly = True
-        self.results_s3.Font = drawing.Font("Courier New", 9)
+        self.results_s3.Font = _t.F_MONO
+        self.results_s3.BackgroundColor = _t.PANEL
         self.results_s3.Text = "Select a parent layer and click Calculate.\n"
 
         layout = forms.StackLayout()
@@ -1066,7 +1121,7 @@ class LinderoForm(forms.Form):
             "Footprints are merged per leaf group per floor (same as S3), "
             "then summed across all floors of the chosen parent layer."
         )
-        desc.TextColor = drawing.Colors.Gray
+        desc.TextColor = _t.TEXT_MUTED
         desc.Wrap = forms.WrapMode.Word
         layout.Items.Add(forms.StackLayoutItem(desc))
 
@@ -1107,7 +1162,8 @@ class LinderoForm(forms.Form):
         # Results text area
         self.results_s4 = forms.TextArea()
         self.results_s4.ReadOnly = True
-        self.results_s4.Font = drawing.Font("Courier New", 9)
+        self.results_s4.Font = _t.F_MONO
+        self.results_s4.BackgroundColor = _t.PANEL
         self.results_s4.Text = "Define at least one key, select a parent layer, and click Calculate.\n"
         layout.Items.Add(forms.StackLayoutItem(self.results_s4, True))
 
@@ -1173,11 +1229,11 @@ class LinderoForm(forms.Form):
             "Compares totals to Room Target Key (set in Settings). "
             "Data source: S3 keys or S4 hierarchy (configurable in Settings)."
         )
-        desc.TextColor = drawing.Colors.Gray
+        desc.TextColor = _t.TEXT_MUTED
         desc.Wrap = forms.WrapMode.Word
 
         self.warn_r1 = forms.Label()
-        self.warn_r1.TextColor = drawing.Color(0.6, 0.1, 0.1)
+        self.warn_r1.TextColor = _t.TEXT_ERROR
         self.warn_r1.Wrap = forms.WrapMode.Word
         self.warn_r1.Visible = False
 
@@ -1213,11 +1269,11 @@ class LinderoForm(forms.Form):
             "Compares totals to Group Target Key (set in Settings). "
             "Data source: S3 keys or S4 hierarchy (configurable in Settings)."
         )
-        desc.TextColor = drawing.Colors.Gray
+        desc.TextColor = _t.TEXT_MUTED
         desc.Wrap = forms.WrapMode.Word
 
         self.warn_r2 = forms.Label()
-        self.warn_r2.TextColor = drawing.Color(0.6, 0.1, 0.1)
+        self.warn_r2.TextColor = _t.TEXT_ERROR
         self.warn_r2.Wrap = forms.WrapMode.Word
         self.warn_r2.Visible = False
 
@@ -1252,7 +1308,7 @@ class LinderoForm(forms.Form):
         # ── Program Key Mapping ──────────────────────────────────────
         sec1 = forms.Label()
         sec1.Text = "Program Key Mapping"
-        sec1.Font = drawing.Font("Arial", 9, drawing.FontStyle.Bold)
+        sec1.Font = _t.F_HEAD
         layout.AddRow(sec1)
         layout.AddRow(None)
 
@@ -1264,7 +1320,7 @@ class LinderoForm(forms.Form):
         self.room_target_key_dd.Width = 280
         rtk_hint = forms.Label()
         rtk_hint.Text = "Key containing the target area per room type"
-        rtk_hint.TextColor = drawing.Colors.Gray
+        rtk_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(rtk_lbl, self.room_target_key_dd)
         layout.AddRow(None, rtk_hint)
         layout.AddRow(None)
@@ -1277,7 +1333,7 @@ class LinderoForm(forms.Form):
         self.grp_target_key_dd.Width = 280
         gtk_hint = forms.Label()
         gtk_hint.Text = "Key containing the target area per group"
-        gtk_hint.TextColor = drawing.Colors.Gray
+        gtk_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(gtk_lbl, self.grp_target_key_dd)
         layout.AddRow(None, gtk_hint)
         layout.AddRow(None)
@@ -1285,12 +1341,12 @@ class LinderoForm(forms.Form):
         # ── Tolerance ────────────────────────────────────────────────
         sep1 = forms.Label()
         sep1.Text = "─" * 42
-        sep1.TextColor = drawing.Colors.Gray
+        sep1.TextColor = _t.TEXT_MUTED
         layout.AddRow(sep1)
 
         sec2 = forms.Label()
         sec2.Text = "Tolerance"
-        sec2.Font = drawing.Font("Arial", 9, drawing.FontStyle.Bold)
+        sec2.Font = _t.F_HEAD
         layout.AddRow(sec2)
         layout.AddRow(None)
 
@@ -1305,7 +1361,7 @@ class LinderoForm(forms.Form):
         self.tolerance_stepper.Width       = 80
         tol_hint = forms.Label()
         tol_hint.Text = "Symmetric tolerance applied in R1 and R2 bullet charts"
-        tol_hint.TextColor = drawing.Colors.Gray
+        tol_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(tol_lbl, self.tolerance_stepper)
         layout.AddRow(None, tol_hint)
         layout.AddRow(None)
@@ -1313,12 +1369,12 @@ class LinderoForm(forms.Form):
         # ── R1 / R2 Data Source ───────────────────────────────────────
         sep2 = forms.Label()
         sep2.Text = "─" * 42
-        sep2.TextColor = drawing.Colors.Gray
+        sep2.TextColor = _t.TEXT_MUTED
         layout.AddRow(sep2)
 
         sec3 = forms.Label()
         sec3.Text = "R1 / R2 Data Source"
-        sec3.Font = drawing.Font("Arial", 9, drawing.FontStyle.Bold)
+        sec3.Font = _t.F_HEAD
         layout.AddRow(sec3)
         layout.AddRow(None)
 
@@ -1331,7 +1387,7 @@ class LinderoForm(forms.Form):
         self.r1r2_source_dd.Width = 180
         src_hint = forms.Label()
         src_hint.Text = "Which parent layer and keys feed the R1 and R2 bullet charts"
-        src_hint.TextColor = drawing.Colors.Gray
+        src_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(src_lbl, self.r1r2_source_dd)
         layout.AddRow(None, src_hint)
         layout.AddRow(None)
@@ -1347,7 +1403,7 @@ class LinderoForm(forms.Form):
         self.r1_level_stepper.Width        = 60
         r1_lvl_hint = forms.Label()
         r1_lvl_hint.Text = "Position in S4 key list used as room key  (1 = top level)"
-        r1_lvl_hint.TextColor = drawing.Colors.Gray
+        r1_lvl_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(r1_lvl_lbl, self.r1_level_stepper)
         layout.AddRow(None, r1_lvl_hint)
         layout.AddRow(None)
@@ -1363,7 +1419,7 @@ class LinderoForm(forms.Form):
         self.r2_level_stepper.Width        = 60
         r2_lvl_hint = forms.Label()
         r2_lvl_hint.Text = "Position in S4 key list used as group key  (1 = top level)"
-        r2_lvl_hint.TextColor = drawing.Colors.Gray
+        r2_lvl_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(r2_lvl_lbl, self.r2_level_stepper)
         layout.AddRow(None, r2_lvl_hint)
         layout.AddRow(None)
@@ -1371,12 +1427,12 @@ class LinderoForm(forms.Form):
         # ── Configuration ────────────────────────────────────────────
         sep3 = forms.Label()
         sep3.Text = "─" * 42
-        sep3.TextColor = drawing.Colors.Gray
+        sep3.TextColor = _t.TEXT_MUTED
         layout.AddRow(sep3)
 
         sec4 = forms.Label()
         sec4.Text = "Configuration"
-        sec4.Font = drawing.Font("Arial", 9, drawing.FontStyle.Bold)
+        sec4.Font = _t.F_HEAD
         layout.AddRow(sec4)
         layout.AddRow(None)
 
@@ -1390,7 +1446,7 @@ class LinderoForm(forms.Form):
 
         cfg_hint = forms.Label()
         cfg_hint.Text = 'Saves / loads all settings to "lindero_config.json"'
-        cfg_hint.TextColor = drawing.Colors.Gray
+        cfg_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(save_btn, load_btn)
         layout.AddRow(None, cfg_hint)
 
@@ -1455,7 +1511,7 @@ class LinderoForm(forms.Form):
             f"Refreshed  —  {len(self.available_layers)} layer(s), "
             f"{len(self.available_keys)} key(s)."
         )
-        self.status_label.TextColor = drawing.Colors.Gray
+        self.status_label.TextColor = _t.TEXT_MUTED
 
     def on_calculate(self, _sender, _e):
         unit = unit_label()
@@ -1474,10 +1530,10 @@ class LinderoForm(forms.Form):
                 fn(unit)
             else:
                 self.status_label.Text = "Switch to a calculation tab (S1–S4, R1–R2) to calculate."
-                self.status_label.TextColor = drawing.Colors.Gray
+                self.status_label.TextColor = _t.TEXT_MUTED
         except Exception as ex:
             self.status_label.Text = f"Error: {ex}"
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
 
     def on_clear(self, _sender, _e):
         idx = self.tabs.SelectedIndex
@@ -1499,12 +1555,12 @@ class LinderoForm(forms.Form):
             self.warn_r2.Visible = False
             self.chart_r2.Invalidate()
         self.status_label.Text = "Cleared."
-        self.status_label.TextColor = drawing.Colors.Gray
+        self.status_label.TextColor = _t.TEXT_MUTED
 
     def on_export(self, _sender, _e):
         if self._export_data is None:
             self.status_label.Text = "Nothing to export — run Calculate on S1, S2, S3, or S4 first."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         path = rs.SaveFileName(
@@ -1520,10 +1576,10 @@ class LinderoForm(forms.Form):
         try:
             export_to_excel(self._export_data, path)
             self.status_label.Text = f"Exported → {path}"
-            self.status_label.TextColor = drawing.Colors.Green
+            self.status_label.TextColor = _t.TEXT_OK
         except Exception as ex:
             self.status_label.Text = f"Export failed: {ex}"
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
 
     def on_export_png(self, _sender, _e):
         idx = self.tabs.SelectedIndex
@@ -1535,12 +1591,12 @@ class LinderoForm(forms.Form):
             default_name = "Lindero_R2_GroupAnalysis"
         else:
             self.status_label.Text = "Switch to R1 or R2 tab to export a chart as PNG."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         if not entries:
             self.status_label.Text = "No chart data — run Calculate first."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         path = rs.SaveFileName(
@@ -1556,10 +1612,10 @@ class LinderoForm(forms.Form):
         try:
             _export_chart_png(entries, tol, unit, path)
             self.status_label.Text = f"Chart exported → {path}"
-            self.status_label.TextColor = drawing.Colors.Green
+            self.status_label.TextColor = _t.TEXT_OK
         except Exception as ex:
             self.status_label.Text = f"PNG export failed: {ex}"
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
 
     # ------------------------------------------------------------------
     # Event handlers — Write Area
@@ -1575,7 +1631,7 @@ class LinderoForm(forms.Form):
         key = self._write_key_combo.Text.strip()
         if not key:
             self.status_label.Text = "Enter a key name to write to."
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
             return
 
         idx = self.tabs.SelectedIndex
@@ -1590,7 +1646,7 @@ class LinderoForm(forms.Form):
 
         if not objects:
             self.status_label.Text = "No calculated data — run Calculate first on S1, S2, or S3."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         count = 0
@@ -1608,7 +1664,7 @@ class LinderoForm(forms.Form):
         sc.doc.Views.Redraw()
         self._write_panel.Visible = False
         self.status_label.Text = f"Area written to {count} object(s) using key '{key}'"
-        self.status_label.TextColor = drawing.Colors.Green
+        self.status_label.TextColor = _t.TEXT_OK
 
     # ------------------------------------------------------------------
     # Event handlers — Settings config
@@ -1638,10 +1694,10 @@ class LinderoForm(forms.Form):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
             self.status_label.Text = f"Config saved → {path}"
-            self.status_label.TextColor = drawing.Colors.Green
+            self.status_label.TextColor = _t.TEXT_OK
         except Exception as ex:
             self.status_label.Text = f"Save failed: {ex}"
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
 
     def on_load_config(self, _s, _e):
         path = rs.OpenFileName(
@@ -1678,10 +1734,10 @@ class LinderoForm(forms.Form):
                     self._s4_add_key_row()
 
             self.status_label.Text = f"Config loaded ← {path}"
-            self.status_label.TextColor = drawing.Colors.Green
+            self.status_label.TextColor = _t.TEXT_OK
         except Exception as ex:
             self.status_label.Text = f"Load failed: {ex}"
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
 
     # ------------------------------------------------------------------
     # Per-scenario runners — S1 / S2 / S3
@@ -1694,7 +1750,7 @@ class LinderoForm(forms.Form):
         if not results:
             self.results_s1.Text = "  No objects are currently selected in Rhino.\n"
             self.status_label.Text = "No selection."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         self.results_s1.Text = format_s1(results, unit)
@@ -1708,13 +1764,13 @@ class LinderoForm(forms.Form):
         self.status_label.Text = (
             f"S1  —  {len(results)} object(s)  |  Total: {total:,.4f} {unit}"
         )
-        self.status_label.TextColor = drawing.Colors.Green
+        self.status_label.TextColor = _t.TEXT_OK
 
     def _run_s2(self, unit):
         layer_name = self._selected_layer(self.layer_s2_dd)
         if not layer_name:
             self.status_label.Text = "Please select a layer."
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
             return
 
         obj_key = self.obj_key_s2.Text.strip()
@@ -1723,7 +1779,7 @@ class LinderoForm(forms.Form):
         if not data["objects"]:
             self.results_s2.Text = f"  No objects found on layer '{layer_name}'.\n"
             self.status_label.Text = f"Layer '{short_name(layer_name)}' is empty."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         self.results_s2.Text = format_s2(data, layer_name, obj_key, unit)
@@ -1737,13 +1793,13 @@ class LinderoForm(forms.Form):
             f"S2  —  '{short_name(layer_name)}'  |  "
             f"{len(data['objects'])} object(s)  |  Total: {data['total']:,.4f} {unit}"
         )
-        self.status_label.TextColor = drawing.Colors.Green
+        self.status_label.TextColor = _t.TEXT_OK
 
     def _run_s3(self, unit):
         parent = self._selected_layer(self.parent_layer_dd)
         if not parent:
             self.status_label.Text = "Please select a parent layer."
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
             return
 
         obj_key = self.obj_key_s3.Text.strip()
@@ -1754,7 +1810,7 @@ class LinderoForm(forms.Form):
         if not non_empty:
             self.results_s3.Text = f"  No objects found in any sublayer of '{parent}'.\n"
             self.status_label.Text = "No objects found in sublayers."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         self.results_s3.Text = format_s3(data, parent, obj_key, grp_key, unit)
@@ -1770,7 +1826,7 @@ class LinderoForm(forms.Form):
             f"{len(data['sublayers'])} sublayer(s)  |  "
             f"Overall total: {data['overall_total']:,.4f} {unit}"
         )
-        self.status_label.TextColor = drawing.Colors.Green
+        self.status_label.TextColor = _t.TEXT_OK
 
     # ------------------------------------------------------------------
     # Per-scenario runner — S4
@@ -1780,14 +1836,14 @@ class LinderoForm(forms.Form):
         parent = self._selected_layer(self.parent_layer_s4_dd)
         if not parent:
             self.status_label.Text = "Please select a parent layer on the S4 tab."
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
             return
 
         key_seq = [cb.Text.strip() for cb in self._s4_key_rows]
         key_seq = [k for k in key_seq if k]   # drop blank entries
         if not key_seq:
             self.status_label.Text = "S4 requires at least one attribute key."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         data = calc_s4(parent, key_seq)
@@ -1795,7 +1851,7 @@ class LinderoForm(forms.Form):
         if not data["tree"]:
             self.results_s4.Text = f"  No objects found in any sublayer of '{parent}'.\n"
             self.status_label.Text = "No objects found in sublayers."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         self.results_s4.Text = format_s4(data, parent, key_seq, unit)
@@ -1814,7 +1870,7 @@ class LinderoForm(forms.Form):
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
         self.status_label.TextColor = (
-            drawing.Colors.Orange if n_warn else drawing.Colors.Green
+            _t.TEXT_WARN if n_warn else _t.TEXT_OK
         )
 
     # ------------------------------------------------------------------
@@ -1829,11 +1885,11 @@ class LinderoForm(forms.Form):
             obj_key = self.obj_key_s3.Text.strip()
             if not parent:
                 self.status_label.Text = "R1 uses S3 Parent Layer — select one on the S3 tab."
-                self.status_label.TextColor = drawing.Colors.Red
+                self.status_label.TextColor = _t.TEXT_ERROR
                 return
             if not obj_key:
                 self.status_label.Text = "R1 uses S3 Object Key — set one on the S3 tab."
-                self.status_label.TextColor = drawing.Colors.Orange
+                self.status_label.TextColor = _t.TEXT_WARN
                 return
         else:
             parent  = self._selected_layer(self.parent_layer_s4_dd)
@@ -1841,13 +1897,13 @@ class LinderoForm(forms.Form):
             idx     = int(self.r1_level_stepper.Value) - 1   # 0-based
             if not parent:
                 self.status_label.Text = "R1 uses S4 Parent Layer — select one on the S4 tab."
-                self.status_label.TextColor = drawing.Colors.Red
+                self.status_label.TextColor = _t.TEXT_ERROR
                 return
             if idx < 0 or idx >= len(key_seq) or not key_seq[idx]:
                 self.status_label.Text = (
                     f"R1: Level {idx + 1} is undefined in the S4 key sequence."
                 )
-                self.status_label.TextColor = drawing.Colors.Orange
+                self.status_label.TextColor = _t.TEXT_WARN
                 return
             obj_key = key_seq[idx]
 
@@ -1857,7 +1913,7 @@ class LinderoForm(forms.Form):
 
         if not data["entries"]:
             self.status_label.Text = "No objects found — check parent layer setting."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         self._r1_entries = data["entries"]
@@ -1883,7 +1939,7 @@ class LinderoForm(forms.Form):
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
         self.status_label.TextColor = (
-            drawing.Colors.Orange if n_warn else drawing.Colors.Green
+            _t.TEXT_WARN if n_warn else _t.TEXT_OK
         )
 
     def _run_r2(self, unit):
@@ -1894,11 +1950,11 @@ class LinderoForm(forms.Form):
             grp_key = self.grp_key_s3.Text.strip()
             if not parent:
                 self.status_label.Text = "R2 uses S3 Parent Layer — select one on the S3 tab."
-                self.status_label.TextColor = drawing.Colors.Red
+                self.status_label.TextColor = _t.TEXT_ERROR
                 return
             if not grp_key:
                 self.status_label.Text = "R2 uses S3 Group Key — set one on the S3 tab."
-                self.status_label.TextColor = drawing.Colors.Orange
+                self.status_label.TextColor = _t.TEXT_WARN
                 return
         else:
             parent  = self._selected_layer(self.parent_layer_s4_dd)
@@ -1906,13 +1962,13 @@ class LinderoForm(forms.Form):
             idx     = int(self.r2_level_stepper.Value) - 1   # 0-based
             if not parent:
                 self.status_label.Text = "R2 uses S4 Parent Layer — select one on the S4 tab."
-                self.status_label.TextColor = drawing.Colors.Red
+                self.status_label.TextColor = _t.TEXT_ERROR
                 return
             if idx < 0 or idx >= len(key_seq) or not key_seq[idx]:
                 self.status_label.Text = (
                     f"R2: Level {idx + 1} is undefined in the S4 key sequence."
                 )
-                self.status_label.TextColor = drawing.Colors.Orange
+                self.status_label.TextColor = _t.TEXT_WARN
                 return
             grp_key = key_seq[idx]
 
@@ -1922,7 +1978,7 @@ class LinderoForm(forms.Form):
 
         if not data["entries"]:
             self.status_label.Text = "No objects found — check parent layer setting."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
             return
 
         self._r2_entries = data["entries"]
@@ -1948,7 +2004,7 @@ class LinderoForm(forms.Form):
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
         self.status_label.TextColor = (
-            drawing.Colors.Orange if n_warn else drawing.Colors.Green
+            _t.TEXT_WARN if n_warn else _t.TEXT_OK
         )
 
     # ------------------------------------------------------------------
