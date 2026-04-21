@@ -39,6 +39,12 @@ import Rhino
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 
+import sys as _sys, os as _os
+_rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
+if _rg_root not in _sys.path:
+    _sys.path.insert(0, _rg_root)
+from ui import theme as _t
+
 
 def get_all_user_text_keys():
     """Collect all unique user text keys from every object in the model, sorted."""
@@ -173,6 +179,7 @@ class BaquianoSearchForm(forms.Form):
         self.available_keys = get_all_user_text_keys()
         self.Title = "Baquiano Search Data"
         self.Padding = drawing.Padding(10)
+        self.BackgroundColor = _t.BG
         self.Resizable = True
         self.MinimumSize = drawing.Size(480, 480)
         self.ClientSize  = drawing.Size(640, 580)
@@ -186,14 +193,14 @@ class BaquianoSearchForm(forms.Form):
         # Header
         header = forms.Label()
         header.Text = "Search Rhino Objects by User Keys"
-        header.Font = drawing.Font(drawing.SystemFont.Bold, 12)
+        header.Font = _t.F_HEAD
         layout.AddRow(header)
         layout.AddRow(None)
 
         # Search scope
         scope_label = forms.Label()
         scope_label.Text = "Search Scope:"
-        scope_label.Font = drawing.Font(drawing.SystemFont.Bold)
+        scope_label.Font = _t.F_SANS_B
         layout.AddRow(scope_label)
 
         self.scope_all_radio = forms.RadioButton()
@@ -206,7 +213,7 @@ class BaquianoSearchForm(forms.Form):
 
         hint = forms.Label()
         hint.Text = "(select objects in Rhino, then click Search)"
-        hint.TextColor = drawing.Colors.Gray
+        hint.TextColor = _t.TEXT_MUTED
 
         layout.AddRow(self.scope_all_radio)
         scope_row = forms.StackLayout()
@@ -225,10 +232,12 @@ class BaquianoSearchForm(forms.Form):
 
         self.keys_info_label = forms.Label()
         self.keys_info_label.Text = self._keys_info_text()
-        self.keys_info_label.TextColor = drawing.Colors.Gray
+        self.keys_info_label.TextColor = _t.TEXT_MUTED
 
         refresh_btn = forms.Button()
         refresh_btn.Text = "Refresh Keys"
+        refresh_btn.Font = _t.F_SANS_B
+        refresh_btn.BackgroundColor = _t.BTN_DEFAULT
         refresh_btn.Click += self.on_refresh_keys
 
         keys_row.Items.Add(forms.StackLayoutItem(self.keys_info_label, True))
@@ -240,7 +249,7 @@ class BaquianoSearchForm(forms.Form):
         # Include conditions section
         include_label = forms.Label()
         include_label.Text = "Include Conditions (objects must match ALL):"
-        include_label.Font = drawing.Font(drawing.SystemFont.Bold)
+        include_label.Font = _t.F_SANS_B
         layout.AddRow(include_label)
 
         # Column headers for include
@@ -268,6 +277,8 @@ class BaquianoSearchForm(forms.Form):
 
         add_include_btn = forms.Button()
         add_include_btn.Text = "+ Add Include Condition"
+        add_include_btn.Font = _t.F_SANS_B
+        add_include_btn.BackgroundColor = _t.BTN_DEFAULT
         add_include_btn.Click += self.on_add_include
         layout.AddRow(add_include_btn)
 
@@ -276,7 +287,7 @@ class BaquianoSearchForm(forms.Form):
         # Exclude conditions section
         exclude_label = forms.Label()
         exclude_label.Text = "Exclude Conditions (objects matching ANY will be excluded):"
-        exclude_label.Font = drawing.Font(drawing.SystemFont.Bold)
+        exclude_label.Font = _t.F_SANS_B
         layout.AddRow(exclude_label)
 
         # Column headers for exclude
@@ -304,6 +315,8 @@ class BaquianoSearchForm(forms.Form):
 
         add_exclude_btn = forms.Button()
         add_exclude_btn.Text = "+ Add Exclude Condition"
+        add_exclude_btn.Font = _t.F_SANS_B
+        add_exclude_btn.BackgroundColor = _t.BTN_DEFAULT
         add_exclude_btn.Click += self.on_add_exclude
         layout.AddRow(add_exclude_btn)
 
@@ -316,10 +329,14 @@ class BaquianoSearchForm(forms.Form):
 
         search_btn = forms.Button()
         search_btn.Text = "Search"
+        search_btn.Font = _t.F_SANS_B
+        search_btn.BackgroundColor = _t.BTN_CALC
         search_btn.Click += self.on_search
 
         close_btn = forms.Button()
         close_btn.Text = "Close"
+        close_btn.Font = _t.F_SANS_B
+        close_btn.BackgroundColor = _t.BTN_CLEAR
         close_btn.Click += self.on_close_btn
 
         button_layout.Items.Add(forms.StackLayoutItem(search_btn))
@@ -330,7 +347,7 @@ class BaquianoSearchForm(forms.Form):
         # Status label — updated after each search or refresh
         self.status_label = forms.Label()
         self.status_label.Text = "Ready."
-        self.status_label.TextColor = drawing.Colors.Gray
+        self.status_label.TextColor = _t.TEXT_MUTED
         layout.AddRow(self.status_label)
 
         # Wrap the whole layout in a Scrollable so the form stays a fixed size
@@ -360,7 +377,7 @@ class BaquianoSearchForm(forms.Form):
         for row in self.include_conditions + self.exclude_conditions:
             row.update_available_keys(self.available_keys)
         self.status_label.Text = f"Keys refreshed — {len(self.available_keys)} key(s) found."
-        self.status_label.TextColor = drawing.Colors.Gray
+        self.status_label.TextColor = _t.TEXT_MUTED
 
     # ------------------------------------------------------------------
     # Condition management
@@ -406,7 +423,7 @@ class BaquianoSearchForm(forms.Form):
 
         if not include_conditions:
             self.status_label.Text = "Error: specify at least one include condition."
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
             return
 
         # Determine search scope — reads live Rhino selection if "selected" is chosen
@@ -417,7 +434,7 @@ class BaquianoSearchForm(forms.Form):
 
         if not objects_to_search:
             self.status_label.Text = "No objects in the selected scope."
-            self.status_label.TextColor = drawing.Colors.Red
+            self.status_label.TextColor = _t.TEXT_ERROR
             return
 
         results = perform_search(objects_to_search, include_conditions, exclude_conditions)
@@ -430,10 +447,10 @@ class BaquianoSearchForm(forms.Form):
             self.status_label.Text = (
                 f"Found {len(results)} object(s) in {scope_text} | Include: {inc_summary}"
             )
-            self.status_label.TextColor = drawing.Colors.Green
+            self.status_label.TextColor = _t.TEXT_OK
         else:
             self.status_label.Text = "No objects found matching the search criteria."
-            self.status_label.TextColor = drawing.Colors.Orange
+            self.status_label.TextColor = _t.TEXT_WARN
 
     def on_close_btn(self, _sender, _e):
         self.Close()
