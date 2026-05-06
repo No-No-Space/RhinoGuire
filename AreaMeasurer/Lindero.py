@@ -67,6 +67,42 @@ _rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__f
 if _rg_root not in _sys.path:
     _sys.path.insert(0, _rg_root)
 from ui import theme as _t
+import importlib as _importlib; _importlib.reload(_t)
+
+# ============================================================================
+# PERSISTENT PREFERENCES (last-used folder per action)
+# ============================================================================
+
+_PREFS_PATH = _os.path.normpath(
+    _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "_prefs.json")
+)
+
+
+def _prefs_get(key, fallback=None):
+    """Return the last-used folder for *key*, or *fallback* if not set / gone."""
+    try:
+        with open(_PREFS_PATH, 'r') as f:
+            folder = json.load(f).get(key)
+        if folder and _os.path.isdir(folder):
+            return folder
+    except Exception:
+        pass
+    return fallback
+
+
+def _prefs_set(key, file_path):
+    """Save the directory of *file_path* as the last-used folder for *key*."""
+    try:
+        try:
+            with open(_PREFS_PATH, 'r') as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        data[key] = _os.path.dirname(file_path)
+        with open(_PREFS_PATH, 'w') as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -819,6 +855,11 @@ class LinderoForm(forms.Form):
         self._last_s3 = None   # {sublayers, overall_total}
         self._last_s4 = None   # {tree, overall_total, warnings}
 
+        # Search-filter updater functions for key ComboBoxes (populated by tab builders)
+        self._ks_combos = []   # [updater, ...] for static key combos
+        self._ks_write  = None # updater for _write_key_combo (has extra "Area" item)
+        self._ks_s4     = {}   # {cb: updater} for dynamic S4 rows
+
         # R1 / R2 chart state
         self._r1_entries = []
         self._r1_tol     = 0.10
@@ -928,6 +969,7 @@ class LinderoForm(forms.Form):
         self._write_key_combo.DataStore = ["Area"] + list(self.available_keys)
         self._write_key_combo.Text = "Area"
         self._write_key_combo.Width = 180
+        self._ks_write = _t.bind_key_search(self._write_key_combo, ["Area"] + list(self.available_keys))
 
         confirm_btn = forms.Button()
         confirm_btn.Text = "Confirm Write"
@@ -972,6 +1014,7 @@ class LinderoForm(forms.Form):
         self.name_key_combo.DataStore = self.available_keys
         self.name_key_combo.PlaceholderText = "Falls back to object name / GUID"
         self.name_key_combo.Width = 300
+        self._ks_combos.append(_t.bind_key_search(self.name_key_combo, self.available_keys))
         controls.AddRow(name_lbl, self.name_key_combo)
         controls.AddRow(None)
 
@@ -1022,6 +1065,7 @@ class LinderoForm(forms.Form):
         self.obj_key_s2.DataStore = self.available_keys
         self.obj_key_s2.PlaceholderText = "User text key for object labels"
         self.obj_key_s2.Width = 300
+        self._ks_combos.append(_t.bind_key_search(self.obj_key_s2, self.available_keys))
         controls.AddRow(obj_key_lbl, self.obj_key_s2)
 
         self.results_s2 = forms.TextArea()
@@ -1067,6 +1111,7 @@ class LinderoForm(forms.Form):
         self.obj_key_s3.DataStore = self.available_keys
         self.obj_key_s3.PlaceholderText = "Individual / small group name"
         self.obj_key_s3.Width = 300
+        self._ks_combos.append(_t.bind_key_search(self.obj_key_s3, self.available_keys))
         obj_key_hint = forms.Label()
         obj_key_hint.Text = "Individual or small group name (e.g. 'Room Name')"
         obj_key_hint.TextColor = _t.TEXT_MUTED
@@ -1080,6 +1125,7 @@ class LinderoForm(forms.Form):
         self.grp_key_s3.DataStore = self.available_keys
         self.grp_key_s3.PlaceholderText = "Department / class (larger grouping)"
         self.grp_key_s3.Width = 300
+        self._ks_combos.append(_t.bind_key_search(self.grp_key_s3, self.available_keys))
         grp_key_hint = forms.Label()
         grp_key_hint.Text = "Larger class grouping (e.g. 'Department')"
         grp_key_hint.TextColor = _t.TEXT_MUTED
@@ -1180,6 +1226,7 @@ class LinderoForm(forms.Form):
         cb.DataStore = self.available_keys
         cb.Text = initial_text
         cb.Width = 280
+        self._ks_s4[id(cb)] = _t.bind_key_search(cb, self.available_keys)
 
         rm_btn = forms.Button()
         rm_btn.Text = "✕"
@@ -1204,6 +1251,7 @@ class LinderoForm(forms.Form):
             return
         if cb in self._s4_key_rows:
             self._s4_key_rows.remove(cb)
+            self._ks_s4.pop(id(cb), None)
         for i in range(self._s4_keys_layout.Items.Count):
             if self._s4_keys_layout.Items[i].Control is row_ctrl:
                 self._s4_keys_layout.Items.RemoveAt(i)
@@ -1318,6 +1366,7 @@ class LinderoForm(forms.Form):
         self.room_target_key_dd.DataStore = self.available_keys
         self.room_target_key_dd.PlaceholderText = "Key holding target area per room"
         self.room_target_key_dd.Width = 280
+        self._ks_combos.append(_t.bind_key_search(self.room_target_key_dd, self.available_keys))
         rtk_hint = forms.Label()
         rtk_hint.Text = "Key containing the target area per room type"
         rtk_hint.TextColor = _t.TEXT_MUTED
@@ -1331,6 +1380,7 @@ class LinderoForm(forms.Form):
         self.grp_target_key_dd.DataStore = self.available_keys
         self.grp_target_key_dd.PlaceholderText = "Key holding target area per group"
         self.grp_target_key_dd.Width = 280
+        self._ks_combos.append(_t.bind_key_search(self.grp_target_key_dd, self.available_keys))
         gtk_hint = forms.Label()
         gtk_hint.Text = "Key containing the target area per group"
         gtk_hint.TextColor = _t.TEXT_MUTED
@@ -1487,25 +1537,17 @@ class LinderoForm(forms.Form):
         self.available_keys   = get_all_user_text_keys()
         self.available_layers = all_layer_names()
 
-        for combo in [self.name_key_combo, self.obj_key_s2, self.obj_key_s3,
-                      self.grp_key_s3, self.room_target_key_dd, self.grp_target_key_dd]:
-            txt = combo.Text
-            combo.DataStore = self.available_keys
-            combo.Text = txt
+        for upd in self._ks_combos:
+            upd(self.available_keys)
 
-        # Refresh S4 dynamic key rows
-        for cb in self._s4_key_rows:
-            txt = cb.Text
-            cb.DataStore = self.available_keys
-            cb.Text = txt
+        for upd in self._ks_s4.values():
+            upd(self.available_keys)
 
         self._restore_layer_dd(self.layer_s2_dd,        prev_s2)
         self._restore_layer_dd(self.parent_layer_dd,    prev_parent)
         self._restore_layer_dd(self.parent_layer_s4_dd, prev_s4_par)
 
-        prev_wk = self._write_key_combo.Text
-        self._write_key_combo.DataStore = ["Area"] + list(self.available_keys)
-        self._write_key_combo.Text = prev_wk or "Area"
+        self._ks_write(["Area"] + list(self.available_keys))
 
         self.status_label.Text = (
             f"Refreshed  —  {len(self.available_layers)} layer(s), "
@@ -1566,10 +1608,11 @@ class LinderoForm(forms.Form):
         path = rs.SaveFileName(
             "Export Results to Excel",
             "Excel Files (*.xlsx)|*.xlsx||",
-            None, "Lindero_Results", "xlsx"
+            _prefs_get('lindero_export_xlsx'), "Lindero_Results", "xlsx"
         )
         if not path:
             return
+        _prefs_set('lindero_export_xlsx', path)
         if not path.lower().endswith(".xlsx"):
             path += ".xlsx"
 
@@ -1602,10 +1645,11 @@ class LinderoForm(forms.Form):
         path = rs.SaveFileName(
             "Export Chart as PNG",
             "PNG Images (*.png)|*.png||",
-            None, default_name, "png"
+            _prefs_get('lindero_export_png'), default_name, "png"
         )
         if not path:
             return
+        _prefs_set('lindero_export_png', path)
         if not path.lower().endswith(".png"):
             path += ".png"
 
@@ -1674,10 +1718,11 @@ class LinderoForm(forms.Form):
         path = rs.SaveFileName(
             "Save Lindero Configuration",
             "JSON Files (*.json)|*.json||",
-            None, "lindero_config", "json"
+            _prefs_get('lindero_config'), "lindero_config", "json"
         )
         if not path:
             return
+        _prefs_set('lindero_config', path)
         if not path.lower().endswith(".json"):
             path += ".json"
         cfg = {
@@ -1702,10 +1747,12 @@ class LinderoForm(forms.Form):
     def on_load_config(self, _s, _e):
         path = rs.OpenFileName(
             "Load Lindero Configuration",
-            "JSON Files (*.json)|*.json||"
+            "JSON Files (*.json)|*.json||",
+            folder=_prefs_get('lindero_config')
         )
         if not path:
             return
+        _prefs_set('lindero_config', path)
         try:
             with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)

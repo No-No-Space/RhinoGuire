@@ -36,7 +36,43 @@ import rhinoscriptsyntax as rs
 import scriptcontext as sc
 import Rhino
 import os
+import json
 from collections import defaultdict
+
+# ============================================================================
+# PERSISTENT PREFERENCES (last-used folder per action)
+# ============================================================================
+
+_PREFS_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_prefs.json")
+)
+
+
+def _prefs_get(key, fallback=None):
+    """Return the last-used folder for *key*, or *fallback* if not set / gone."""
+    try:
+        with open(_PREFS_PATH, 'r') as f:
+            folder = json.load(f).get(key)
+        if folder and os.path.isdir(folder):
+            return folder
+    except Exception:
+        pass
+    return fallback
+
+
+def _prefs_set(key, file_path):
+    """Save the directory of *file_path* as the last-used folder for *key*."""
+    try:
+        try:
+            with open(_PREFS_PATH, 'r') as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        data[key] = os.path.dirname(file_path)
+        with open(_PREFS_PATH, 'w') as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
 
 # Import openpyxl for Excel operations
 try:
@@ -59,6 +95,7 @@ _rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__f
 if _rg_root not in _sys.path:
     _sys.path.insert(0, _rg_root)
 from ui import theme as _t
+import importlib as _importlib; _importlib.reload(_t)
 
 
 # ============================================================================
@@ -385,6 +422,10 @@ class ColorManagerDialog(forms.Form):
         self.key_label = forms.Label()
         self.key_label.Text = "Select Metadata Key:"
 
+        self.key_search = forms.TextBox()
+        self.key_search.PlaceholderText = "Search keys..."
+        self.key_search.TextChanged += self.on_key_search_changed
+
         self.key_dropdown = forms.DropDown()
         available_keys = sorted(self.color_map.keys())
         for key in available_keys:
@@ -404,9 +445,11 @@ class ColorManagerDialog(forms.Form):
         self.legend_label = forms.Label()
         self.legend_label.Text = "Color Legend:"
 
-        self.legend_panel = forms.Panel()
-        self.legend_panel.Size = drawing.Size(450, 200)
-        self.legend_panel.BackgroundColor = _t.PANEL
+        self.legend_scrollable = forms.Scrollable()
+        self.legend_scrollable.ExpandContentWidth = True
+        self.legend_scrollable.ExpandContentHeight = False
+        self.legend_scrollable.BackgroundColor = _t.PANEL
+        self.legend_scrollable.Size = drawing.Size(450, 200)
         self.update_legend()
 
         self.warnings_label = forms.Label()
@@ -459,13 +502,14 @@ class ColorManagerDialog(forms.Form):
         layout = forms.DynamicLayout()
         layout.Spacing = drawing.Size(5, 5)
         layout.AddRow(self.key_label)
+        layout.AddRow(self.key_search)
         layout.AddRow(self.key_dropdown)
         layout.AddRow(None)
         layout.AddRow(self.default_color_label)
         layout.AddRow(self.default_color_picker)
         layout.AddRow(None)
         layout.AddRow(self.legend_label)
-        layout.AddRow(self.legend_panel)
+        layout.AddRow(self.legend_scrollable)
         layout.AddRow(None)
         layout.AddRow(self.warnings_label)
         layout.AddRow(self.warnings_text)
@@ -515,7 +559,7 @@ class ColorManagerDialog(forms.Form):
             row_layout.AddRow(color_panel, value_label, rgb_label)
             legend_layout.AddRow(row_layout)
 
-        self.legend_panel.Content = legend_layout
+        self.legend_scrollable.Content = legend_layout
 
     def update_warnings(self, stats):
         warnings = []
@@ -546,6 +590,19 @@ class ColorManagerDialog(forms.Form):
 
         self.warnings_text.Text = "\n".join(warnings)
         self.select_button.Enabled = len(self.problem_objects) > 0
+
+    def on_key_search_changed(self, _sender, _e):
+        text = self.key_search.Text.lower().strip()
+        all_keys = sorted(self.color_map.keys())
+        filtered = [k for k in all_keys if text in k.lower()] if text else all_keys
+        prev_key = self.active_key
+        self.key_dropdown.Items.Clear()
+        for k in filtered:
+            self.key_dropdown.Items.Add(k)
+        if prev_key and prev_key in filtered:
+            self.key_dropdown.SelectedIndex = filtered.index(prev_key)
+        elif filtered:
+            self.key_dropdown.SelectedIndex = 0
 
     def on_key_changed(self, sender, e):
         selected = self.key_dropdown.SelectedValue
@@ -591,10 +648,12 @@ class ColorManagerDialog(forms.Form):
             return
 
         # Ask for save location
+        folder = _prefs_get('chivito_legend_png')
         png_path = rs.SaveFileName("Save Legend as PNG", "PNG Files (*.png)|*.png||",
-                                   filename=f"Legend_{self.active_key}.png")
+                                   folder=folder, filename=f"Legend_{self.active_key}.png")
         if not png_path:
             return
+        _prefs_set('chivito_legend_png', png_path)
 
         try:
             # Layout constants
@@ -700,6 +759,223 @@ class ColorManagerDialog(forms.Form):
 
     def on_close_clicked(self, sender, e):
         self.Close()
+
+
+# ============================================================================
+# STEP 1 HELPER DIALOGS
+# ============================================================================
+
+class _StepOneChoiceDialog(forms.Dialog[bool]):
+    """Ask the user whether to load an existing template or create a new one."""
+
+    def __init__(self):
+        super().__init__()
+        self.choice = None  # 'load' | 'create'
+
+        self.Title = "Step 1 — Initialize Keys"
+        self.Padding = drawing.Padding(15)
+        self.BackgroundColor = _t.BG
+        self.Resizable = False
+        self.ClientSize = drawing.Size(380, 155)
+
+        desc = forms.Label()
+        desc.Text = ("Load an existing Excel template or create a new one from scratch.\n"
+                     "Both options will apply the defined keys to selected objects.")
+        desc.Wrap = forms.WrapMode.Word
+        desc.TextColor = _t.TEXT_MUTED
+
+        load_btn = forms.Button()
+        load_btn.Text = "Load Existing File"
+        load_btn.Font = _t.F_SANS_B
+        load_btn.BackgroundColor = _t.BTN_CALC
+        load_btn.Click += self._on_load
+
+        create_btn = forms.Button()
+        create_btn.Text = "Create New Template"
+        create_btn.Font = _t.F_SANS_B
+        create_btn.BackgroundColor = _t.BTN_DEFAULT
+        create_btn.Click += self._on_create
+
+        cancel_btn = forms.Button()
+        cancel_btn.Text = "Cancel"
+        cancel_btn.Font = _t.F_SANS_B
+        cancel_btn.BackgroundColor = _t.BTN_CLEAR
+        cancel_btn.Click += lambda s, e: self.Close(False)
+
+        btn_row = forms.DynamicLayout()
+        btn_row.Spacing = drawing.Size(5, 0)
+        btn_row.AddRow(load_btn, create_btn, cancel_btn)
+
+        layout = forms.DynamicLayout()
+        layout.Spacing = drawing.Size(5, 10)
+        layout.AddRow(desc)
+        layout.AddRow(None)
+        layout.AddRow(btn_row)
+        self.Content = layout
+
+    def _on_load(self, s, e):
+        self.choice = 'load'
+        self.Close(True)
+
+    def _on_create(self, s, e):
+        self.choice = 'create'
+        self.Close(True)
+
+
+class TemplateBuilderDialog(forms.Dialog[bool]):
+    """Build a key-definition Excel template row by row."""
+
+    def __init__(self):
+        super().__init__()
+        self.saved_path = None
+        self._row_data = []  # list of (name_box, value_box, remove_btn)
+
+        self.Title = "Create Excel Template"
+        self.Padding = drawing.Padding(12)
+        self.BackgroundColor = _t.BG
+        self.Resizable = True
+        self.MinimumSize = drawing.Size(480, 380)
+        self.ClientSize = drawing.Size(520, 460)
+
+        self._build_ui()
+        for _ in range(3):
+            self._add_row()
+
+    def _build_ui(self):
+        instr = forms.Label()
+        instr.Text = ("Define the metadata keys your model will use.\n"
+                      "Column A = key name, Column B = optional default value.\n"
+                      "Chivito will write these keys to selected objects once saved.")
+        instr.Wrap = forms.WrapMode.Word
+        instr.TextColor = _t.TEXT_MUTED
+
+        # Column header row
+        hdr_key = forms.Label()
+        hdr_key.Text = "Key Name"
+        hdr_key.Font = _t.F_SANS_B
+
+        hdr_val = forms.Label()
+        hdr_val.Text = "Default Value"
+        hdr_val.Font = _t.F_SANS_B
+
+        hdr_row = forms.DynamicLayout()
+        hdr_row.Spacing = drawing.Size(5, 0)
+        hdr_row.AddRow(hdr_key, hdr_val, None)
+
+        # Scrollable key rows
+        self._stack = forms.StackLayout()
+        self._stack.Orientation = forms.Orientation.Vertical
+        self._stack.Spacing = 4
+        self._stack.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+
+        self._scrollable = forms.Scrollable()
+        self._scrollable.ExpandContentWidth = True
+        self._scrollable.ExpandContentHeight = False
+        self._scrollable.BackgroundColor = _t.PANEL
+        self._scrollable.Content = self._stack
+        self._scrollable.Size = drawing.Size(-1, 230)
+
+        add_btn = forms.Button()
+        add_btn.Text = "+ Add Key"
+        add_btn.Font = _t.F_SANS_B
+        add_btn.BackgroundColor = _t.BTN_DEFAULT
+        add_btn.Click += lambda s, e: self._add_row()
+
+        save_btn = forms.Button()
+        save_btn.Text = "Save Template..."
+        save_btn.Font = _t.F_SANS_B
+        save_btn.BackgroundColor = _t.BTN_CALC
+        save_btn.Click += self._on_save
+
+        cancel_btn = forms.Button()
+        cancel_btn.Text = "Cancel"
+        cancel_btn.Font = _t.F_SANS_B
+        cancel_btn.BackgroundColor = _t.BTN_CLEAR
+        cancel_btn.Click += lambda s, e: self.Close(False)
+
+        btn_row = forms.DynamicLayout()
+        btn_row.Spacing = drawing.Size(5, 0)
+        btn_row.AddRow(save_btn, cancel_btn)
+
+        layout = forms.DynamicLayout()
+        layout.Spacing = drawing.Size(5, 8)
+        layout.AddRow(instr)
+        layout.AddRow(None)
+        layout.AddRow(hdr_row)
+        layout.AddRow(self._scrollable)
+        layout.AddRow(add_btn)
+        layout.AddRow(None)
+        layout.AddRow(btn_row)
+        self.Content = layout
+
+    def _add_row(self, key='', default=''):
+        name_box = forms.TextBox()
+        name_box.Text = key
+        name_box.PlaceholderText = "Key name"
+
+        value_box = forms.TextBox()
+        value_box.Text = default
+        value_box.PlaceholderText = "Default value (optional)"
+
+        remove_btn = forms.Button()
+        remove_btn.Text = "×"
+        remove_btn.Size = drawing.Size(28, 24)
+        remove_btn.BackgroundColor = _t.BTN_CLEAR
+
+        row_tuple = (name_box, value_box, remove_btn)
+        self._row_data.append(row_tuple)
+
+        row_layout = forms.DynamicLayout()
+        row_layout.Spacing = drawing.Size(5, 0)
+        row_layout.AddRow(name_box, value_box, remove_btn)
+
+        def on_remove(s, e, rt=row_tuple):
+            self._remove_row(rt)
+        remove_btn.Click += on_remove
+
+        self._stack.Items.Add(forms.StackLayoutItem(row_layout))
+
+    def _remove_row(self, row_tuple):
+        if row_tuple not in self._row_data:
+            return
+        idx = self._row_data.index(row_tuple)
+        self._row_data.pop(idx)
+        self._stack.Items.RemoveAt(idx)
+
+    def _on_save(self, sender, e):
+        keys = {
+            name_box.Text.strip(): value_box.Text.strip()
+            for name_box, value_box, _ in self._row_data
+            if name_box.Text.strip()
+        }
+        if not keys:
+            forms.MessageBox.Show("Add at least one key name before saving.", "No Keys Defined")
+            return
+
+        folder = _prefs_get('chivito_step1')
+        path = rs.SaveFileName("Save Excel Template", "Excel Files (*.xlsx)|*.xlsx||",
+                               folder, "KeyTemplate.xlsx")
+        if not path:
+            return
+
+        try:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Keys"
+            hdr_a = ws.cell(row=1, column=1, value="Key Name")
+            hdr_a.font = ExcelFont(bold=True)
+            hdr_b = ws.cell(row=1, column=2, value="Default Value")
+            hdr_b.font = ExcelFont(bold=True)
+            for i, (key_name, default_val) in enumerate(keys.items(), start=2):
+                ws.cell(row=i, column=1, value=key_name)
+                ws.cell(row=i, column=2, value=default_val)
+            wb.save(path)
+            wb.close()
+            _prefs_set('chivito_step1', path)
+            self.saved_path = path
+            self.Close(True)
+        except Exception as ex:
+            forms.MessageBox.Show(f"Error saving template:\n{ex}", "Save Error")
 
 
 # ============================================================================
@@ -813,10 +1089,28 @@ class DataVisualizationTool(forms.Form):
         self.Content = layout
 
     def on_step1(self, sender, e):
-        excel_path = rs.OpenFileName("Select Excel File", "Excel Files (*.xlsx)|*.xlsx||",
-                                     folder=self.excel_folder if os.path.exists(self.excel_folder) else None)
-        if not excel_path:
+        # Ask user whether to load an existing template or build a new one
+        choice_dlg = _StepOneChoiceDialog()
+        result = choice_dlg.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow)
+        choice = choice_dlg.choice
+        choice_dlg.Dispose()
+        if not result or not choice:
             return
+
+        if choice == 'load':
+            folder = _prefs_get('chivito_step1', self.excel_folder if os.path.exists(self.excel_folder) else None)
+            excel_path = rs.OpenFileName("Select Excel File", "Excel Files (*.xlsx)|*.xlsx||", folder=folder)
+            if not excel_path:
+                return
+            _prefs_set('chivito_step1', excel_path)
+        else:
+            builder = TemplateBuilderDialog()
+            result2 = builder.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow)
+            excel_path = builder.saved_path
+            builder.Dispose()
+            if not result2 or not excel_path:
+                return
+
         objects = rs.GetObjects("Select objects", preselect=True)
         if not objects:
             return
@@ -826,8 +1120,12 @@ class DataVisualizationTool(forms.Form):
             return
         stats = apply_keys_to_objects(objects, keys)
         self.status.Text = f"Step 1: {stats['keys_added']} keys added"
-        forms.MessageBox.Show(f"Keys applied!\n\nObjects: {stats['objects_processed']}\nKeys added: {stats['keys_added']}\nSkipped: {stats['keys_skipped']}", "Complete")
-        self.BringToFront()  # Return focus
+        forms.MessageBox.Show(
+            f"Keys applied!\n\nObjects: {stats['objects_processed']}\n"
+            f"Keys added: {stats['keys_added']}\nSkipped: {stats['keys_skipped']}",
+            "Complete"
+        )
+        self.BringToFront()
 
     def on_step2(self, sender, e):
         objects = rs.GetObjects("Select objects", preselect=True)
@@ -837,11 +1135,12 @@ class DataVisualizationTool(forms.Form):
         if not kvd:
             forms.MessageBox.Show("No metadata found", "Error")
             return
+        folder = _prefs_get('chivito_step2', self.excel_folder if os.path.exists(self.excel_folder) else None)
         excel_path = rs.SaveFileName("Save Excel File", "Excel Files (*.xlsx)|*.xlsx||",
-                                     folder=self.excel_folder if os.path.exists(self.excel_folder) else None,
-                                     filename="UniqueValuesColorSettings.xlsx")
+                                     folder=folder, filename="UniqueValuesColorSettings.xlsx")
         if not excel_path:
             return
+        _prefs_set('chivito_step2', excel_path)
         file_existed = os.path.exists(excel_path)
         rows = write_color_map_excel(excel_path, kvd)
         self.status.Text = f"Step 2: {rows} values exported"
@@ -856,10 +1155,11 @@ class DataVisualizationTool(forms.Form):
         objects = rs.GetObjects("Select objects", preselect=True)
         if not objects:
             return
-        excel_path = rs.OpenFileName("Select color Excel file", "Excel Files (*.xlsx)|*.xlsx||",
-                                     folder=self.excel_folder if os.path.exists(self.excel_folder) else None)
+        folder = _prefs_get('chivito_step3', self.excel_folder if os.path.exists(self.excel_folder) else None)
+        excel_path = rs.OpenFileName("Select color Excel file", "Excel Files (*.xlsx)|*.xlsx||", folder=folder)
         if not excel_path:
             return
+        _prefs_set('chivito_step3', excel_path)
         # Launch Color Manager as modeless form
         color_dlg = ColorManagerDialog(excel_path, objects)
         color_dlg.Owner = Rhino.UI.RhinoEtoApp.MainWindow

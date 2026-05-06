@@ -97,6 +97,46 @@ def hint(text):
     return lbl(text, F_SANS_S, TEXT_MUTED)
 
 
+def bind_key_search(combo, all_keys):
+    """Attach real-time search filtering to a ComboBox.
+
+    As the user types, DataStore is narrowed to keys whose names contain the
+    query (case-insensitive substring). Clearing the text or selecting an exact
+    match restores the full list so the user can still scroll everything.
+
+    Returns an update(new_keys) callable — call it when the model's available
+    key list changes (e.g. after a Refresh Keys action).
+    """
+    _store = list(all_keys)
+    _busy  = [False]
+
+    def _refresh():
+        if _busy[0]:
+            return
+        _busy[0] = True
+        try:
+            text = (combo.Text or "").lower()
+            if not text or any(k.lower() == text for k in _store):
+                filtered = list(_store)
+            else:
+                filtered = [k for k in _store if text in k.lower()]
+            current = combo.Text
+            combo.DataStore = filtered
+            combo.Text = current
+        finally:
+            _busy[0] = False
+
+    def update(new_keys):
+        _store[:] = new_keys
+        _refresh()
+
+    def _on_text_changed(s, e):
+        _refresh()
+
+    combo.TextChanged += _on_text_changed
+    return update
+
+
 def status_color(state):
     """Return the TextColor for a given status state string.
 

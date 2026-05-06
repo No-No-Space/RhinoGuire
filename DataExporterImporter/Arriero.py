@@ -33,6 +33,7 @@ import Rhino
 import System
 import datetime
 import os
+import json
 from System.Windows.Forms import (
     Form, Button, Label, CheckBox, TextBox, OpenFileDialog,
     DialogResult, FormBorderStyle, MessageBox, MessageBoxButtons,
@@ -40,6 +41,42 @@ from System.Windows.Forms import (
     SaveFileDialog
 )
 from System.Drawing import Point, Size, Font, FontStyle
+
+# ============================================================================
+# PERSISTENT PREFERENCES (last-used folder per action)
+# ============================================================================
+
+_PREFS_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_prefs.json")
+)
+
+
+def _prefs_get(key, fallback=None):
+    """Return the last-used folder for *key*, or *fallback* if not set / gone."""
+    try:
+        with open(_PREFS_PATH, 'r') as f:
+            folder = json.load(f).get(key)
+        if folder and os.path.isdir(folder):
+            return folder
+    except Exception:
+        pass
+    return fallback
+
+
+def _prefs_set(key, file_path):
+    """Save the directory of *file_path* as the last-used folder for *key*."""
+    try:
+        try:
+            with open(_PREFS_PATH, 'r') as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        data[key] = os.path.dirname(file_path)
+        with open(_PREFS_PATH, 'w') as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
 
 # Try to import openpyxl for Excel operations
 try:
@@ -271,12 +308,16 @@ def export_data_to_excel():
     save_dialog.FileName = default_filename
     save_dialog.Title = "Save Excel File"
     save_dialog.DefaultExt = "xlsx"
+    folder = _prefs_get('arriero_export')
+    if folder:
+        save_dialog.InitialDirectory = folder
 
     if save_dialog.ShowDialog() != DialogResult.OK:
         print("Export cancelled by user.")
         return
 
     filepath = save_dialog.FileName
+    _prefs_set('arriero_export', filepath)
 
     # Save workbook
     try:
@@ -337,12 +378,16 @@ def import_data_from_excel(create_backup, create_missing_keys,
     dialog = OpenFileDialog()
     dialog.Filter = "Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*"
     dialog.Title = "Select Excel file to import"
+    folder = _prefs_get('arriero_import')
+    if folder:
+        dialog.InitialDirectory = folder
 
     if dialog.ShowDialog() != DialogResult.OK:
         print("Import cancelled.")
         return
 
     filepath = dialog.FileName
+    _prefs_set('arriero_import', filepath)
     print(f"Selected file: {filepath}")
     
     # Create backup if requested

@@ -44,6 +44,7 @@ _rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__f
 if _rg_root not in _sys.path:
     _sys.path.insert(0, _rg_root)
 from ui import theme as _t
+import importlib as _importlib; _importlib.reload(_t)
 
 
 def get_all_user_text_keys():
@@ -110,6 +111,7 @@ class ConditionRow:
         self.key_combo.DataStore = self.available_keys
         self.key_combo.PlaceholderText = "Key name"
         self.key_combo.Width = 150
+        self._update_key_search = _t.bind_key_search(self.key_combo, self.available_keys)
 
         self.value_textbox = forms.TextBox()
         self.value_textbox.PlaceholderText = "Search value"
@@ -143,10 +145,8 @@ class ConditionRow:
 
     def update_available_keys(self, keys):
         """Repopulate the key ComboBox after a model refresh, preserving current text."""
-        current_text = self.key_combo.Text
         self.available_keys = keys
-        self.key_combo.DataStore = keys
-        self.key_combo.Text = current_text
+        self._update_key_search(keys)
 
     def on_remove(self, sender, e):
         self.parent.remove_condition(self)
