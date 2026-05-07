@@ -214,9 +214,20 @@ def _brep_footprint_curves(brep):
 
     curves = []
     for face in bottom:
-        if face.OuterLoop is None:
-            continue
-        border = face.OuterLoop.To3dCurve()
+        border = None
+        if face.OuterLoop is not None:
+            border = face.OuterLoop.To3dCurve()
+        # Fallback for untrimmed/planar faces where OuterLoop.To3dCurve() fails
+        if border is None:
+            face_copy = face.DuplicateFace(False)
+            if face_copy:
+                edge_curves = face_copy.DuplicateEdgeCurves(True)
+                if edge_curves:
+                    joined = rg.Curve.JoinCurves(edge_curves, tol)
+                    for j in joined:
+                        if j.IsClosed:
+                            border = j
+                            break
         if border is None:
             continue
         dup = border.DuplicateCurve()
@@ -245,6 +256,19 @@ def get_footprint_curves(obj_guid):
 
         if isinstance(geom, rg.Brep):
             return _brep_footprint_curves(geom)
+
+        if isinstance(geom, rg.Hatch):
+            proj = rg.Transform.PlanarProjection(rg.Plane.WorldXY)
+            loops = geom.Get3dCurves(True)
+            if loops:
+                result = []
+                for loop in loops:
+                    if loop.IsClosed:
+                        dup = loop.DuplicateCurve()
+                        dup.Transform(proj)
+                        result.append(dup)
+                if result:
+                    return result
 
         if isinstance(geom, rg.Curve) and geom.IsClosed and geom.IsPlanar():
             proj = rg.Transform.PlanarProjection(rg.Plane.WorldXY)
@@ -288,15 +312,27 @@ def combined_area(obj_guids):
         return curve_area(all_curves[0]), True
 
     tol = sc.doc.ModelAbsoluteTolerance
+
+    # Normalize all curves to CCW when viewed from +Z so that Boolean Union
+    # works consistently regardless of object type (solid bottom faces come out
+    # CW; user-drawn closed curves and hatch loops are typically CCW).
+    xy_plane = rg.Plane.WorldXY
+    normalized = []
+    for c in all_curves:
+        dup = c.DuplicateCurve()
+        if rg.Curve.ClosedCurveOrientation(dup, xy_plane) == rg.CurveOrientation.Clockwise:
+            dup.Reverse()
+        normalized.append(dup)
+
     try:
-        unioned = rg.Curve.CreateBooleanUnion(all_curves, tol)
+        unioned = rg.Curve.CreateBooleanUnion(normalized, tol)
     except Exception:
         unioned = None
 
     if unioned and len(unioned) > 0:
         return sum(curve_area(c) for c in unioned), True
 
-    return sum(curve_area(c) for c in all_curves), False
+    return sum(curve_area(c) for c in normalized), False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -314,9 +350,21 @@ def _label(guid, key):
 
 
 def calc_s1(name_key):
-    """Scenario 1 — Selected objects. Returns list of {guid, name, area}."""
+    """
+    Scenario 1 — Selected objects. Footprints merged to remove overlaps.
+    Returns {objects, total, union_ok, skipped}.
+    """
     guids = rs.SelectedObjects() or []
-    return [{"guid": str(g), "name": _label(g, name_key), "area": get_footprint_area(g)} for g in guids]
+    per_obj = []
+    skipped = 0
+    for g in guids:
+        curves = get_footprint_curves(g)
+        if not curves:
+            skipped += 1
+        area = sum(curve_area(c) for c in curves)
+        per_obj.append({"guid": str(g), "name": _label(g, name_key), "area": area})
+    total, union_ok = combined_area(guids)
+    return {"objects": per_obj, "total": total, "union_ok": union_ok, "skipped": skipped}
 
 
 def calc_s2(layer_name, obj_key):
@@ -529,6 +577,7 @@ def calc_r2(parent_layer, grp_key, grp_target_key):
 # ══════════════════════════════════════════════════════════════════════════════
 
 W = 62  # result panel width in characters
+_DECIMALS = 2  # decimal places — updated from Settings before each format call
 
 
 def _rule(char="═"):
@@ -540,12 +589,14 @@ def _row(left, right="", lw=38):
 
 
 def _fmt(v):
-    return f"{v:,.4f}"
+    return f"{v:,.{_DECIMALS}f}"
 
 
-def format_s1(results, unit):
-    if not results:
+def format_s1(data, unit):
+    if not data["objects"]:
         return "  No objects selected.\n"
+    raw_sum = sum(o["area"] for o in data["objects"])
+    union_note = "" if data["union_ok"] else "  [union failed — sum shown]"
     lines = [
         _rule(),
         f"  SCENARIO 1 — SELECTED OBJECTS   [{unit}]",
@@ -553,10 +604,28 @@ def format_s1(results, unit):
         _row("Object", "Area"),
         _rule("─"),
     ]
-    for r in results:
-        lines.append(_row(r["name"][:36], _fmt(r["area"])))
-    total = sum(r["area"] for r in results)
-    lines += [_rule("─"), _row("TOTAL", _fmt(total)), _rule(), ""]
+    for o in data["objects"]:
+        lines.append(_row(o["name"][:36], _fmt(o["area"])))
+    overlap = raw_sum - data["total"]
+    lines += [
+        _rule("─"),
+        _row("Sum (individual totals)", _fmt(raw_sum)),
+        _row(f"TOTAL (footprint, overlaps merged){union_note}", _fmt(data["total"])),
+    ]
+    if overlap > 1e-6:
+        lines += [
+            _rule("─"),
+            _row("  [!] Overlapping area (sum - total)", _fmt(overlap)),
+            "      Some objects share footprint area.",
+            "      Verify whether double-counting is intentional.",
+        ]
+    if data.get("skipped", 0) > 0:
+        lines += [
+            _rule("─"),
+            f"  [!] {data['skipped']} object(s) had no calculable footprint",
+            "      and were skipped (e.g. points, text, annotations).",
+        ]
+    lines += [_rule(), ""]
     return "\n".join(lines)
 
 
@@ -599,15 +668,15 @@ def format_s2(data, layer_name, obj_key, unit):
     return "\n".join(lines)
 
 
-def format_s3(data, parent_layer, obj_key, grp_key, unit):
+def format_s3_groups(data, parent_layer, grp_key, unit):
+    """Group summary panel for S3: per-floor group totals + overall total."""
     if not data["sublayers"]:
         return f"  No sublayers found under '{parent_layer}'.\n"
     lines = [
         _rule(),
-        f"  SCENARIO 3 — LAYER HIERARCHY   [{unit}]",
-        f"  Parent     : {parent_layer}",
-        f"  Object key : {obj_key or '(object name / GUID)'}",
-        f"  Group key  : {grp_key or '—'}",
+        f"  SCENARIO 3 — GROUPS   [{unit}]",
+        f"  Parent    : {parent_layer}",
+        f"  Group key : {grp_key or '—'}",
         _rule("═"),
         "",
     ]
@@ -618,44 +687,73 @@ def format_s3(data, parent_layer, obj_key, grp_key, unit):
             f"  ▸ {sn}   —   Total: {_fmt(sl_data['total'])} {unit}{union_note}",
             _rule("─"),
         ]
-
         if sl_data["group_totals"] and grp_key:
             lines.append(_row("Group (combined footprint)", "Area"))
             lines.append("  " + "·" * (W - 2))
             for gv, ga in sorted(sl_data["group_totals"].items()):
                 lines.append(_row(f"  {gv}"[:36], _fmt(ga)))
-            lines.append(_rule("─"))
+            group_sum = sum(sl_data["group_totals"].values())
+            cross_group = group_sum - sl_data["total"]
+            if cross_group > 1e-6:
+                lines += [
+                    _rule("─"),
+                    _row("  [!] Cross-group overlap", _fmt(cross_group)),
+                    "      Groups share footprint area across boundaries.",
+                ]
+        else:
+            lines.append("  (no group key set)")
+        lines.append("")
+    lines += [
+        _rule("═"),
+        _row("OVERALL TOTAL (sum of all levels)", _fmt(data["overall_total"])),
+        _rule(),
+        "",
+    ]
+    return "\n".join(lines)
 
+
+def format_s3_objects(data, parent_layer, obj_key, grp_key, unit):
+    """Object detail panel for S3: per-floor individual object list."""
+    if not data["sublayers"]:
+        return f"  No sublayers found under '{parent_layer}'.\n"
+    lines = [
+        _rule(),
+        f"  SCENARIO 3 — OBJECTS   [{unit}]",
+        f"  Parent     : {parent_layer}",
+        f"  Object key : {obj_key or '(object name / GUID)'}",
+        _rule("═"),
+        "",
+    ]
+    for sl, sl_data in data["sublayers"].items():
+        sn = short_name(sl)
+        lines += [f"  ▸ {sn}", _rule("─")]
         if sl_data["objects"]:
             if grp_key:
                 n_w, g_w, a_w = 26, 20, W - 26 - 20 - 4
                 lines.append(f"  {'Object':<{n_w}}{'Group':<{g_w}}{'Area':>{a_w}}")
                 lines.append("  " + "·" * (W - 2))
                 for o in sl_data["objects"]:
-                    n = o["name"][:n_w - 1]
-                    g = o["group"][:g_w - 1]
-                    a = _fmt(o["area"])
-                    lines.append(f"  {n:<{n_w}}{g:<{g_w}}{a:>{a_w}}")
+                    lines.append(
+                        f"  {o['name'][:n_w-1]:<{n_w}}"
+                        f"{o['group'][:g_w-1]:<{g_w}}"
+                        f"{_fmt(o['area']):>{a_w}}"
+                    )
             else:
                 lines.append(_row("Object", "Area"))
                 lines.append("  " + "·" * (W - 2))
                 for o in sl_data["objects"]:
                     lines.append(_row(o["name"][:36], _fmt(o["area"])))
-
-        # Overlap warning
+        else:
+            lines.append("  (no objects)")
         individual_sum = sum(o["area"] for o in sl_data["objects"])
-        group_sum = sum(sl_data["group_totals"].values()) if sl_data["group_totals"] else individual_sum
         total_overlap = individual_sum - sl_data["total"]
-        cross_group_overlap = group_sum - sl_data["total"]
         if total_overlap > 1e-6:
             lines += [
                 _rule("─"),
                 _row("  [!] Overlapping area (sum - total)", _fmt(total_overlap)),
+                "      Some objects share footprint area.",
+                "      Verify whether double-counting is intentional.",
             ]
-            if grp_key and cross_group_overlap > 1e-6:
-                lines.append(_row("      of which cross-group overlap", _fmt(cross_group_overlap)))
-            lines.append("      Some objects share footprint area.")
-            lines.append("      Verify whether double-counting is intentional.")
         if sl_data.get("skipped", 0) > 0:
             lines += [
                 _rule("─"),
@@ -663,13 +761,7 @@ def format_s3(data, parent_layer, obj_key, grp_key, unit):
                 "      and were skipped (e.g. points, text, annotations).",
             ]
         lines.append("")
-
-    lines += [
-        _rule("═"),
-        _row("OVERALL TOTAL (sum of all levels)", _fmt(data["overall_total"])),
-        _rule(),
-        "",
-    ]
+    lines += [_rule(), ""]
     return "\n".join(lines)
 
 
@@ -1023,17 +1115,13 @@ class LinderoForm(forms.Form):
         note.TextColor = _t.TEXT_MUTED
         controls.AddRow(note)
 
-        self.results_s1 = forms.TextArea()
-        self.results_s1.ReadOnly = True
-        self.results_s1.Font = _t.F_MONO
-        self.results_s1.BackgroundColor = _t.PANEL
-        self.results_s1.Text = "Select objects and click Calculate.\n"
+        self.results_s1_grid = self._make_results_grid([(True, 0), (False, 110)])
 
         layout = forms.StackLayout()
         layout.Orientation = forms.Orientation.Vertical
         layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
         layout.Items.Add(forms.StackLayoutItem(controls))
-        layout.Items.Add(forms.StackLayoutItem(self.results_s1, True))
+        layout.Items.Add(forms.StackLayoutItem(self.results_s1_grid, True))
 
         page.Content = layout
         return page
@@ -1068,17 +1156,13 @@ class LinderoForm(forms.Form):
         self._ks_combos.append(_t.bind_key_search(self.obj_key_s2, self.available_keys))
         controls.AddRow(obj_key_lbl, self.obj_key_s2)
 
-        self.results_s2 = forms.TextArea()
-        self.results_s2.ReadOnly = True
-        self.results_s2.Font = _t.F_MONO
-        self.results_s2.BackgroundColor = _t.PANEL
-        self.results_s2.Text = "Select a layer and click Calculate.\n"
+        self.results_s2_grid = self._make_results_grid([(True, 0), (False, 110)])
 
         layout = forms.StackLayout()
         layout.Orientation = forms.Orientation.Vertical
         layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
         layout.Items.Add(forms.StackLayoutItem(controls))
-        layout.Items.Add(forms.StackLayoutItem(self.results_s2, True))
+        layout.Items.Add(forms.StackLayoutItem(self.results_s2_grid, True))
 
         page.Content = layout
         return page
@@ -1105,20 +1189,6 @@ class LinderoForm(forms.Form):
         controls.AddRow(parent_lbl, self.parent_layer_dd)
         controls.AddRow(None)
 
-        obj_key_lbl = forms.Label()
-        obj_key_lbl.Text = "Object Key:"
-        self.obj_key_s3 = forms.ComboBox()
-        self.obj_key_s3.DataStore = self.available_keys
-        self.obj_key_s3.PlaceholderText = "Individual / small group name"
-        self.obj_key_s3.Width = 300
-        self._ks_combos.append(_t.bind_key_search(self.obj_key_s3, self.available_keys))
-        obj_key_hint = forms.Label()
-        obj_key_hint.Text = "Individual or small group name (e.g. 'Room Name')"
-        obj_key_hint.TextColor = _t.TEXT_MUTED
-        controls.AddRow(obj_key_lbl, self.obj_key_s3)
-        controls.AddRow(None, obj_key_hint)
-        controls.AddRow(None)
-
         grp_key_lbl = forms.Label()
         grp_key_lbl.Text = "Group Key:"
         self.grp_key_s3 = forms.ComboBox()
@@ -1131,18 +1201,55 @@ class LinderoForm(forms.Form):
         grp_key_hint.TextColor = _t.TEXT_MUTED
         controls.AddRow(grp_key_lbl, self.grp_key_s3)
         controls.AddRow(None, grp_key_hint)
+        controls.AddRow(None)
 
-        self.results_s3 = forms.TextArea()
-        self.results_s3.ReadOnly = True
-        self.results_s3.Font = _t.F_MONO
-        self.results_s3.BackgroundColor = _t.PANEL
-        self.results_s3.Text = "Select a parent layer and click Calculate.\n"
+        obj_key_lbl = forms.Label()
+        obj_key_lbl.Text = "Object Key:"
+        self.obj_key_s3 = forms.ComboBox()
+        self.obj_key_s3.DataStore = self.available_keys
+        self.obj_key_s3.PlaceholderText = "Individual / small group name"
+        self.obj_key_s3.Width = 300
+        self._ks_combos.append(_t.bind_key_search(self.obj_key_s3, self.available_keys))
+        obj_key_hint = forms.Label()
+        obj_key_hint.Text = "Individual or small group name (e.g. 'Room Name')"
+        obj_key_hint.TextColor = _t.TEXT_MUTED
+        controls.AddRow(obj_key_lbl, self.obj_key_s3)
+        controls.AddRow(None, obj_key_hint)
+
+        # ── Two-panel split results ─────────────────────────────────────
+        grp_hdr = forms.Label()
+        grp_hdr.Text = "Groups — Combined Footprint"
+        grp_hdr.Font = _t.F_HEAD
+        # groups grid: floor name (expand) + area (fixed)
+        self.results_s3_groups_grid = self._make_results_grid([(True, 0), (False, 110)])
+        grp_pane = forms.StackLayout()
+        grp_pane.Orientation = forms.Orientation.Vertical
+        grp_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        grp_pane.Items.Add(forms.StackLayoutItem(grp_hdr))
+        grp_pane.Items.Add(forms.StackLayoutItem(self.results_s3_groups_grid, True))
+
+        obj_hdr = forms.Label()
+        obj_hdr.Text = "Objects — Detail"
+        obj_hdr.Font = _t.F_HEAD
+        # objects grid: object name (expand) + group (fixed) + area (fixed)
+        self.results_s3_objects_grid = self._make_results_grid([(True, 0), (False, 120), (False, 90)])
+        obj_pane = forms.StackLayout()
+        obj_pane.Orientation = forms.Orientation.Vertical
+        obj_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        obj_pane.Items.Add(forms.StackLayoutItem(obj_hdr))
+        obj_pane.Items.Add(forms.StackLayoutItem(self.results_s3_objects_grid, True))
+
+        splitter = forms.Splitter()
+        splitter.Orientation = forms.Orientation.Vertical
+        splitter.Panel1 = grp_pane
+        splitter.Panel2 = obj_pane
+        splitter.Position = 220
 
         layout = forms.StackLayout()
         layout.Orientation = forms.Orientation.Vertical
         layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
         layout.Items.Add(forms.StackLayoutItem(controls))
-        layout.Items.Add(forms.StackLayoutItem(self.results_s3, True))
+        layout.Items.Add(forms.StackLayoutItem(splitter, True))
 
         page.Content = layout
         return page
@@ -1205,13 +1312,27 @@ class LinderoForm(forms.Form):
         self._s4_add_key_row()   # seed with one empty row
         layout.Items.Add(forms.StackLayoutItem(self._s4_keys_layout))
 
-        # Results text area
-        self.results_s4 = forms.TextArea()
-        self.results_s4.ReadOnly = True
-        self.results_s4.Font = _t.F_MONO
-        self.results_s4.BackgroundColor = _t.PANEL
-        self.results_s4.Text = "Define at least one key, select a parent layer, and click Calculate.\n"
-        layout.Items.Add(forms.StackLayoutItem(self.results_s4, True))
+        # Results tree grid
+        self.results_s4_grid = forms.TreeGridView()
+        self.results_s4_grid.ShowHeader = False
+        self.results_s4_grid.AllowColumnReordering = False
+        self.results_s4_grid.AllowMultipleSelection = False
+        self.results_s4_grid.Font = _t.F_MONO
+
+        _lbl_col = forms.GridColumn()
+        _lbl_col.Editable = False
+        _lbl_col.DataCell = forms.TextBoxCell(0)
+        _lbl_col.Expand = True
+        self.results_s4_grid.Columns.Add(_lbl_col)
+
+        _area_col = forms.GridColumn()
+        _area_col.Editable = False
+        _area_col.DataCell = forms.TextBoxCell(1)
+        _area_col.Width = 110
+        self.results_s4_grid.Columns.Add(_area_col)
+
+        self.results_s4_grid.CellFormatting += self._on_cell_format
+        layout.Items.Add(forms.StackLayoutItem(self.results_s4_grid, True))
 
         page.Content = layout
         return page
@@ -1416,6 +1537,22 @@ class LinderoForm(forms.Form):
         layout.AddRow(None, tol_hint)
         layout.AddRow(None)
 
+        dec_lbl = forms.Label()
+        dec_lbl.Text = "Decimal Places:"
+        self.decimal_stepper = forms.NumericStepper()
+        self.decimal_stepper.MinValue     = 0
+        self.decimal_stepper.MaxValue     = 4
+        self.decimal_stepper.Value        = 2
+        self.decimal_stepper.DecimalPlaces = 0
+        self.decimal_stepper.Increment    = 1
+        self.decimal_stepper.Width        = 60
+        dec_hint = forms.Label()
+        dec_hint.Text = "Number of decimal places shown in all results (0 – 4)"
+        dec_hint.TextColor = _t.TEXT_MUTED
+        layout.AddRow(dec_lbl, self.decimal_stepper)
+        layout.AddRow(None, dec_hint)
+        layout.AddRow(None)
+
         # ── R1 / R2 Data Source ───────────────────────────────────────
         sep2 = forms.Label()
         sep2.Text = "─" * 42
@@ -1556,6 +1693,8 @@ class LinderoForm(forms.Form):
         self.status_label.TextColor = _t.TEXT_MUTED
 
     def on_calculate(self, _sender, _e):
+        global _DECIMALS
+        _DECIMALS = int(self.decimal_stepper.Value)
         unit = unit_label()
         try:
             idx = self.tabs.SelectedIndex
@@ -1580,13 +1719,14 @@ class LinderoForm(forms.Form):
     def on_clear(self, _sender, _e):
         idx = self.tabs.SelectedIndex
         if idx == 0:
-            self.results_s1.Text = ""
+            self.results_s1_grid.DataStore = forms.TreeGridItemCollection()
         elif idx == 1:
-            self.results_s2.Text = ""
+            self.results_s2_grid.DataStore = forms.TreeGridItemCollection()
         elif idx == 2:
-            self.results_s3.Text = ""
+            self.results_s3_groups_grid.DataStore  = forms.TreeGridItemCollection()
+            self.results_s3_objects_grid.DataStore = forms.TreeGridItemCollection()
         elif idx == 3:
-            self.results_s4.Text = ""
+            self.results_s4_grid.DataStore = forms.TreeGridItemCollection()
             self._last_s4 = None
         elif idx == 4:
             self._r1_entries = []
@@ -1729,6 +1869,7 @@ class LinderoForm(forms.Form):
             "room_target_key":   self.room_target_key_dd.Text.strip(),
             "group_target_key":  self.grp_target_key_dd.Text.strip(),
             "tolerance_percent": self.tolerance_stepper.Value,
+            "decimal_places":    int(self.decimal_stepper.Value),
             "s4_parent_layer":   self._selected_layer(self.parent_layer_s4_dd) or "",
             "s4_key_sequence":   [cb.Text.strip() for cb in self._s4_key_rows],
             "r1r2_source":       self.r1r2_source_dd.SelectedIndex,
@@ -1759,6 +1900,7 @@ class LinderoForm(forms.Form):
             self.room_target_key_dd.Text  = cfg.get("room_target_key", "")
             self.grp_target_key_dd.Text   = cfg.get("group_target_key", "")
             self.tolerance_stepper.Value  = float(cfg.get("tolerance_percent", 10.0))
+            self.decimal_stepper.Value    = float(cfg.get("decimal_places", 2))
             self.r1r2_source_dd.SelectedIndex = int(cfg.get("r1r2_source", 0))
             self.r1_level_stepper.Value   = float(cfg.get("r1_level_index", 1))
             self.r2_level_stepper.Value   = float(cfg.get("r2_level_index", 2))
@@ -1792,24 +1934,23 @@ class LinderoForm(forms.Form):
 
     def _run_s1(self, unit):
         name_key = self.name_key_combo.Text.strip()
-        results  = calc_s1(name_key)
+        data = calc_s1(name_key)
 
-        if not results:
-            self.results_s1.Text = "  No objects are currently selected in Rhino.\n"
+        if not data["objects"]:
+            self.results_s1_grid.DataStore = forms.TreeGridItemCollection()
             self.status_label.Text = "No selection."
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
-        self.results_s1.Text = format_s1(results, unit)
-        self._last_s1 = results
-        total = sum(r["area"] for r in results)
+        self._populate_flat_grid(self.results_s1_grid, data)
+        self._last_s1 = data["objects"]
         self._export_data = {
             "scenario": 1, "unit": unit,
             "params": {"name_key": name_key},
-            "objects": results,
+            "objects": data["objects"],
         }
         self.status_label.Text = (
-            f"S1  —  {len(results)} object(s)  |  Total: {total:,.4f} {unit}"
+            f"S1  —  {len(data['objects'])} object(s)  |  Total: {_fmt(data['total'])} {unit}"
         )
         self.status_label.TextColor = _t.TEXT_OK
 
@@ -1824,12 +1965,12 @@ class LinderoForm(forms.Form):
         data    = calc_s2(layer_name, obj_key)
 
         if not data["objects"]:
-            self.results_s2.Text = f"  No objects found on layer '{layer_name}'.\n"
+            self.results_s2_grid.DataStore = forms.TreeGridItemCollection()
             self.status_label.Text = f"Layer '{short_name(layer_name)}' is empty."
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
-        self.results_s2.Text = format_s2(data, layer_name, obj_key, unit)
+        self._populate_flat_grid(self.results_s2_grid, data)
         self._last_s2 = data
         self._export_data = {
             "scenario": 2, "unit": unit,
@@ -1838,7 +1979,7 @@ class LinderoForm(forms.Form):
         }
         self.status_label.Text = (
             f"S2  —  '{short_name(layer_name)}'  |  "
-            f"{len(data['objects'])} object(s)  |  Total: {data['total']:,.4f} {unit}"
+            f"{len(data['objects'])} object(s)  |  Total: {_fmt(data['total'])} {unit}"
         )
         self.status_label.TextColor = _t.TEXT_OK
 
@@ -1855,12 +1996,14 @@ class LinderoForm(forms.Form):
 
         non_empty = [sl for sl, d in data["sublayers"].items() if d["objects"]]
         if not non_empty:
-            self.results_s3.Text = f"  No objects found in any sublayer of '{parent}'.\n"
+            self.results_s3_groups_grid.DataStore  = forms.TreeGridItemCollection()
+            self.results_s3_objects_grid.DataStore = forms.TreeGridItemCollection()
             self.status_label.Text = "No objects found in sublayers."
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
-        self.results_s3.Text = format_s3(data, parent, obj_key, grp_key, unit)
+        self._populate_s3_groups_grid(data, grp_key)
+        self._populate_s3_objects_grid(data, grp_key)
         self._last_s3 = data
         self._export_data = {
             "scenario": 3, "unit": unit,
@@ -1871,9 +2014,191 @@ class LinderoForm(forms.Form):
         self.status_label.Text = (
             f"S3  —  '{short_name(parent)}'  |  "
             f"{len(data['sublayers'])} sublayer(s)  |  "
-            f"Overall total: {data['overall_total']:,.4f} {unit}"
+            f"Overall total: {_fmt(data['overall_total'])} {unit}"
         )
         self.status_label.TextColor = _t.TEXT_OK
+
+    # ------------------------------------------------------------------
+    # S4 grid helpers
+    # ------------------------------------------------------------------
+
+    def _on_cell_format(self, _, e):
+        """
+        Shared CellFormatting handler for all result grids.
+        Row type is stored in the last Values slot:
+          0/1  data row even/odd  → white / ROW_ALT stripe
+          10   section header     → BTN_DEFAULT + bold
+          20   subtotal           → BTN_DEFAULT
+          30   grand total        → TOTAL_BG + bold
+          40   warning/info       → TEXT_WARN foreground
+        """
+        item = e.Item
+        if not isinstance(item, forms.TreeGridItem):
+            return
+        vals = item.Values
+        if vals is None or len(vals) == 0:
+            return
+        try:
+            rt = int(vals[len(vals) - 1])
+        except (TypeError, ValueError):
+            return
+        if rt == 1:
+            e.BackgroundColor = _t.ROW_ALT
+        elif rt == 10:
+            e.BackgroundColor = _t.BTN_DEFAULT
+            e.Font = _t.F_MONO_B
+        elif rt == 20:
+            e.BackgroundColor = _t.BTN_DEFAULT
+        elif rt == 30:
+            e.BackgroundColor = _t.TOTAL_BG
+            e.Font = _t.F_MONO_B
+        elif rt == 40:
+            e.ForegroundColor = _t.TEXT_WARN
+
+    def _populate_s4_grid(self, data):
+        """Build TreeGridItemCollection from calc_s4 data and assign to grid."""
+        collection = forms.TreeGridItemCollection()
+
+        def add_nodes(parent_col, node_dict):
+            for val in sorted(node_dict):
+                entry = node_dict[val]
+                has_children = bool(entry["children"])
+                item = forms.TreeGridItem()
+                item.Values = [val, _fmt(entry["area"]).rjust(10), 10 if has_children else 0]
+                item.Expanded = True
+                if has_children:
+                    add_nodes(item.Children, entry["children"])
+                parent_col.Add(item)
+
+        add_nodes(collection, data["tree"])
+
+        total_item = forms.TreeGridItem()
+        total_item.Values = ["OVERALL TOTAL", _fmt(data["overall_total"]).rjust(10), 30]
+        collection.Add(total_item)
+
+        self.results_s4_grid.DataStore = collection
+
+    # ------------------------------------------------------------------
+    # Shared grid factory
+    # ------------------------------------------------------------------
+
+    def _make_results_grid(self, col_specs):
+        """
+        Return a styled TreeGridView.
+        col_specs: list of (expand: bool, width_px: int) — one per data column.
+        The last Values slot is always the hidden type-code; no column is added for it.
+        """
+        grid = forms.TreeGridView()
+        grid.ShowHeader = False
+        grid.AllowColumnReordering = False
+        grid.AllowMultipleSelection = False
+        grid.Font = _t.F_MONO
+        for i, (expand, width) in enumerate(col_specs):
+            col = forms.GridColumn()
+            col.Editable = False
+            col.DataCell = forms.TextBoxCell(i)
+            if expand:
+                col.Expand = True
+            else:
+                col.Width = width
+            grid.Columns.Add(col)
+        grid.CellFormatting += self._on_cell_format
+        return grid
+
+    # ------------------------------------------------------------------
+    # Grid populate helpers — S1 / S2
+    # ------------------------------------------------------------------
+
+    def _populate_flat_grid(self, grid, data):
+        """
+        Shared populator for S1 and S2: flat object list + sum + total + warnings.
+        data must have: objects [{name, area}], total, union_ok, skipped.
+        """
+        collection = forms.TreeGridItemCollection()
+        raw_sum = sum(o["area"] for o in data["objects"])
+        for i, o in enumerate(data["objects"]):
+            item = forms.TreeGridItem()
+            item.Values = [o["name"], _fmt(o["area"]).rjust(10), i % 2]
+            collection.Add(item)
+        sum_item = forms.TreeGridItem()
+        sum_item.Values = ["Sum (individual totals)", _fmt(raw_sum).rjust(10), 20]
+        collection.Add(sum_item)
+        union_note = "  [union failed — sum shown]" if not data["union_ok"] else ""
+        total_item = forms.TreeGridItem()
+        total_item.Values = [f"TOTAL (overlaps merged){union_note}", _fmt(data["total"]).rjust(10), 30]
+        collection.Add(total_item)
+        overlap = raw_sum - data["total"]
+        if overlap > 1e-6:
+            w = forms.TreeGridItem()
+            w.Values = [f"  Overlap: {_fmt(overlap)} — some objects share footprint area", "", 40]
+            collection.Add(w)
+        if data.get("skipped", 0) > 0:
+            w = forms.TreeGridItem()
+            w.Values = [f"  {data['skipped']} object(s) skipped (no calculable footprint)", "", 40]
+            collection.Add(w)
+        grid.DataStore = collection
+
+    # ------------------------------------------------------------------
+    # Grid populate helpers — S3 (groups panel)
+    # ------------------------------------------------------------------
+
+    def _populate_s3_groups_grid(self, data, grp_key):
+        """Floor header rows with group children; overall total at the bottom."""
+        collection = forms.TreeGridItemCollection()
+        for sl, sl_data in data["sublayers"].items():
+            union_note = "  [union failed]" if not sl_data["union_ok"] else ""
+            floor_item = forms.TreeGridItem()
+            floor_item.Values = [
+                f"▸ {short_name(sl)}{union_note}",
+                _fmt(sl_data["total"]).rjust(10),
+                10,
+            ]
+            floor_item.Expanded = True
+            if sl_data["group_totals"] and grp_key:
+                for i, (gv, ga) in enumerate(sorted(sl_data["group_totals"].items())):
+                    child = forms.TreeGridItem()
+                    child.Values = [f"  {gv}", _fmt(ga).rjust(10), i % 2]
+                    floor_item.Children.Add(child)
+                group_sum = sum(sl_data["group_totals"].values())
+                cross = group_sum - sl_data["total"]
+                if cross > 1e-6:
+                    w = forms.TreeGridItem()
+                    w.Values = [f"  Cross-group overlap: {_fmt(cross)}", "", 40]
+                    floor_item.Children.Add(w)
+            collection.Add(floor_item)
+        total_item = forms.TreeGridItem()
+        total_item.Values = ["OVERALL TOTAL", _fmt(data["overall_total"]).rjust(10), 30]
+        collection.Add(total_item)
+        self.results_s3_groups_grid.DataStore = collection
+
+    # ------------------------------------------------------------------
+    # Grid populate helpers — S3 (objects panel)
+    # ------------------------------------------------------------------
+
+    def _populate_s3_objects_grid(self, data, grp_key):
+        """Floor header rows with object children (name + group + area)."""
+        collection = forms.TreeGridItemCollection()
+        for sl, sl_data in data["sublayers"].items():
+            floor_item = forms.TreeGridItem()
+            floor_item.Values = [f"▸ {short_name(sl)}", "", "", 10]
+            floor_item.Expanded = True
+            for i, o in enumerate(sl_data["objects"]):
+                child = forms.TreeGridItem()
+                grp = o.get("group", "") if grp_key else ""
+                child.Values = [o["name"], grp, _fmt(o["area"]).rjust(10), i % 2]
+                floor_item.Children.Add(child)
+            individual_sum = sum(o["area"] for o in sl_data["objects"])
+            overlap = individual_sum - sl_data["total"]
+            if overlap > 1e-6:
+                w = forms.TreeGridItem()
+                w.Values = [f"  Overlap: {_fmt(overlap)}", "", "", 40]
+                floor_item.Children.Add(w)
+            if sl_data.get("skipped", 0) > 0:
+                w = forms.TreeGridItem()
+                w.Values = [f"  {sl_data['skipped']} object(s) skipped", "", "", 40]
+                floor_item.Children.Add(w)
+            collection.Add(floor_item)
+        self.results_s3_objects_grid.DataStore = collection
 
     # ------------------------------------------------------------------
     # Per-scenario runner — S4
@@ -1896,12 +2221,12 @@ class LinderoForm(forms.Form):
         data = calc_s4(parent, key_seq)
 
         if not data["tree"]:
-            self.results_s4.Text = f"  No objects found in any sublayer of '{parent}'.\n"
+            self.results_s4_grid.DataStore = forms.TreeGridItemCollection()
             self.status_label.Text = "No objects found in sublayers."
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
-        self.results_s4.Text = format_s4(data, parent, key_seq, unit)
+        self._populate_s4_grid(data)
         self._last_s4 = data
         self._export_data = {
             "scenario": 4, "unit": unit,
@@ -1913,7 +2238,7 @@ class LinderoForm(forms.Form):
         self.status_label.Text = (
             f"S4  —  '{short_name(parent)}'  |  "
             f"{len(key_seq)} level(s)  |  "
-            f"Overall total: {data['overall_total']:,.4f} {unit}"
+            f"Overall total: {_fmt(data['overall_total'])} {unit}"
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
         self.status_label.TextColor = (
