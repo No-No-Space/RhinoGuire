@@ -1,9 +1,10 @@
 #! python3
-# # -*- coding: utf-8 -*-
-# __title__ = "Chivito"                           # Name of the button displayed in Revit UI
+# r: openpyxl
+# -*- coding: utf-8 -*-
+# __title__ = "Chivito"
 # __doc__ = """Version = 0.5
 # Date    = 2026-02-14
-# Author: Aquelon - aquelon@pm.me 
+# Author: Aquelon - aquelon@pm.me
 # _____________________________________________________________________
 # Description:
 # Data Visualization Tool - Unified Interface (Python 3 / Excel Version)
@@ -30,7 +31,6 @@
 # The script window needs to be closed before editing the Excel file exported. Correct this, so the file is freed after export.
 # - Correct that the ViewCaptureToFile allows for interaction with the menu from Rhino, so the user cna define the settings of the capture.
 # _____________________________________________________________________
-# r: openpyxl
 
 import rhinoscriptsyntax as rs
 import scriptcontext as sc

@@ -2,18 +2,21 @@
 # r: openpyxl
 # -*- coding: utf-8 -*-
 # __title__ = "Lindero"
-# __doc__ = """Version = 0.4
-# Date    = 2026-04-10
+# __doc__ = """Version = 0.5
+# Date    = 2026-05-07
 # Author: Aquelon - aquelon@pm.me
 # _____________________________________________________________________
 # Description:
 # Footprint area calculator for Rhino objects.
 # "Footprint" = the plan area (XY projection), NOT the sum of all surfaces.
 # Modeless window — Rhino stays accessible while it is open.
+# Accepted geometry: solids, extrusions, closed planar curves, planar
+# surfaces, and hatches.
 # _____________________________________________________________________
 # Six scenarios:
 #   S1 — Selected Objects:
-#        Individual footprint per object, no overlap handling.
+#        Individual footprint per object. Overlapping footprints are
+#        merged with a Boolean Union to avoid double-counting (same as S2).
 #
 #   S2 — By Layer:
 #        All objects on a layer. Overlapping footprints merged with a
@@ -41,6 +44,10 @@
 #        Data source: S3 keys or S4 hierarchy (configurable in Settings).
 # _____________________________________________________________________
 # Last update:
+# - [07.05.2026] - 0.5 Overlap removal for S1; closed curves, planar surfaces,
+#                     and hatches supported; S3 Group Key first, split result
+#                     panels; configurable decimal places in Settings;
+#                     colored grid results for S1–S4
 # - [10.04.2026] - 0.4 S4 Custom Aggregation, R1/R2 (renamed from S4/S5),
 #                     R1/R2 data source toggle (S3 keys or S4 hierarchy)
 # - [26.03.2026] - 0.3 Settings tab, S4/S5 bullet-chart analysis, Write Area,

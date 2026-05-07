@@ -1,6 +1,6 @@
 #! python3
-# # -*- coding: utf-8 -*-
-# __title__ = "Baquiano"                           # Name of the button displayed in Revit UI
+# -*- coding: utf-8 -*-
+# __title__ = "Baquiano"
 # __doc__ = """Version = 0.7
 # Date    = 2026-02-20
 # Author: Aquelon - aquelon@pm.me

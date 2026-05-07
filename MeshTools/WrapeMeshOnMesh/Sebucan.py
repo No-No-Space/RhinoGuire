@@ -3,6 +3,7 @@
 # __title__ = "Sebucan"
 # __doc__ = """Version = 0.4
 # Date    = 2026-03-03
+# Author: Aquelon - aquelon@pm.me
 # _____________________________________________________________________
 # Description:
 # Wraps one or more source objects onto a destination object along the Z axis.

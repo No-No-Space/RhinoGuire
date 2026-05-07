@@ -1,9 +1,10 @@
 #! python3
-# # -*- coding: utf-8 -*-
-# __title__ = "Arriero"                            # Name of the button displayed in Revit UI
+# r: openpyxl
+# -*- coding: utf-8 -*-
+# __title__ = "Arriero"
 # __doc__ = """Version = 0.5
 # Date    = 2026-02-14
-# Author: Aquelon - aquelon@pm.me 
+# Author: Aquelon - aquelon@pm.me
 # _____________________________________________________________________
 # Description:
 # DataExporterImporter for Rhino 8
@@ -26,7 +27,6 @@
 # - Add function that erase keys on objects if they are not present in Excel file, this will allow to use the tool for cleaning up objects by erasing the columns in Excel.
 # Update the logic of the import with empty cells, it seems tha is bit mixed right now. If the cells are emptied in an object, it is possible to erase the key in that object, but this logic may not be transparent for the user.
 # _____________________________________________________________________
-# r: openpyxl
 
 import rhinoscriptsyntax as rs
 import Rhino

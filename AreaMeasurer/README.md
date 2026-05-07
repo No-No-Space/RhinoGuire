@@ -1,6 +1,6 @@
 # Lindero — Footprint Area Calculator
 
-**Version:** 0.4
+**Version:** 0.5
 **Author:** Aquelon
 **Requires:** Rhino 8, CPython 3 engine (`#! python3`), `openpyxl` (auto-installed)
 
@@ -17,9 +17,10 @@ The tool runs as a **modeless window**, so Rhino stays fully interactive while t
 ## Scenarios
 
 ### S1 — Selected Objects
-Calculates the footprint of each selected object **individually**, with no overlap handling. Use this for a quick breakdown of specific objects regardless of their relative positions.
+Calculates the footprint of each selected object and **merges overlapping regions** using a Boolean Union, preventing double-counting when objects share floor area.
 
-- Results: area per object + sum total.
+- Results: area per object + individual sum + combined total (after overlap removal).
+- An **overlap warning** appears when the individual sum exceeds the combined total, reporting the overlapping area.
 - Objects are labelled using a user text key (optional); falls back to the Rhino object name or a short GUID.
 
 ---
@@ -39,10 +40,10 @@ Two user text keys drive the breakdown:
 
 | Key | Purpose | Example attribute | Example value |
 | --- | --- | --- | --- |
-| Object Key | Individual or small-group name | `SpaceType` | `"Office"`, `"Kitchen"` |
 | Group Key | Larger classification | `Department` | `"Private"`, `"Services"` |
+| Object Key | Individual or small-group name | `SpaceType` | `"Office"`, `"Kitchen"` |
 
-- Results: per object, per group subtotal (combined footprint per group within a level), per sublayer total, grand total.
+- Results are shown in **two separate scrollable panels**: the top panel shows per-group subtotals (combined footprint per group within each level); the bottom panel shows per-object breakdown with the group it belongs to.
 - **Overlap warnings** are shown per level when objects share footprint area, including a breakdown of cross-group overlap (objects from different groups occupying the same footprint).
 
 ---
@@ -53,21 +54,7 @@ User-defined hierarchy of attribute keys. You define the levels yourself — for
 
 Per sublayer, footprints are merged within each leaf group using a **Boolean Union** (same overlap logic as S3). Leaf totals are then summed across all floors.
 
-Results are displayed as an **indented tree** in the text area:
-
-```
-  ▸ Residential                              12,450.0000
-    ▸ Housing                                 8,200.0000
-      ▸ Apartment                             5,100.0000
-          Bedroom                             2,400.0000
-          Living Room                         2,700.0000
-      ▸ Studio                                3,100.0000
-          Studio Unit                         3,100.0000
-  ▸ Commercial                               4,250.0000
-    ...
-```
-
-Each non-leaf node shows the cumulative area of all its descendants.
+Results are displayed as a **colored grid**: group header rows have a neutral grey background; the grand total row is highlighted in green. Each non-leaf node shows the cumulative area of all its descendants.
 
 **Using S4 as a data source for R1 / R2:** once keys are defined in S4, you can point R1 and R2 at specific levels of the S4 hierarchy using the level index steppers in Settings — instead of pulling from S3's two-key model.
 
@@ -111,6 +98,12 @@ Defines which user text keys hold the target area values used in R1 and R2:
 
 Dropdowns are populated from all keys present in the model.
 
+### Decimal Places
+
+Controls the number of decimal places shown in all area results. Range: 0–4. Default: 2. Saved as part of the config file (`"decimal_places": 2`).
+
+---
+
 ### Tolerance
 
 **Global Tolerance (%)** — symmetric percentage applied to both R1 and R2 charts. Default: 10%. Range: 0–50%.
@@ -142,6 +135,7 @@ Config file structure:
   "room_target_key": "TargetArea",
   "group_target_key": "GroupTarget",
   "tolerance_percent": 10.0,
+  "decimal_places": 2,
   "s4_parent_layer": "Building",
   "s4_key_sequence": ["Domain", "Main Group", "Subgroup", "Room Type"],
   "r1r2_source": 0,
@@ -221,9 +215,17 @@ Available when the R1 or R2 tab is active. Renders the full bullet chart to a 90
 
 ## Footprint calculation logic
 
-### Step-by-step
+### Accepted geometry
 
-For each **Brep or Extrusion** object:
+| Type | How the footprint is extracted |
+| --- | --- |
+| **Brep / Extrusion** (solid) | Bottom horizontal face(s) are identified; their outer border curves are projected to Z=0 |
+| **Closed planar curve** | The curve itself is projected to Z=0 and its enclosed area is used directly |
+| **Hatch** | Outer boundary loops are extracted with `Get3dCurves` and projected to Z=0 |
+| **Planar surface** (trimmed or untrimmed) | Outer loop extracted; if unavailable, edge curves are joined as a fallback |
+| **Other** (no horizontal face found) | Falls back to the **XY bounding box** as an approximation |
+
+### Step-by-step (Brep / Extrusion)
 
 1. Iterate every face of the solid.
 2. Evaluate the face normal at its centre point.
@@ -232,10 +234,6 @@ For each **Brep or Extrusion** object:
 5. Extract the **outer border curve** of each bottom face.
 6. Project that curve straight down onto the XY plane (`Z = 0`).
 7. Compute the area enclosed by the projected curve using `AreaMassProperties`.
-
-For **closed planar curves** (e.g. a room outline drawn as a flat polyline), the curve itself is projected to Z=0 and its enclosed area is used directly.
-
-For any object where no horizontal face is found (e.g. a cylinder on its side), the tool falls back to the **XY bounding box** as an approximation.
 
 ### What `|normal.Z| > 0.9` means
 
@@ -277,7 +275,7 @@ A future fix would replace the bottom-face method with a true top-down silhouett
 
 ---
 
-## Overlap removal (S2, S3, and S4)
+## Overlap removal (S1, S2, S3, and S4)
 
 Projected footprint curves are passed to `Rhino.Geometry.Curve.CreateBooleanUnion()` at the model's absolute tolerance. If the Boolean Union fails, the tool falls back to a plain sum and marks the result with `[union failed — sum shown]`.
 
