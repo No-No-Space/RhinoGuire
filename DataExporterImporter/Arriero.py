@@ -33,50 +33,22 @@ import Rhino
 import System
 import datetime
 import os
-import json
-from System.Windows.Forms import (
-    Form, Button, Label, CheckBox, TextBox, OpenFileDialog,
-    DialogResult, FormBorderStyle, MessageBox, MessageBoxButtons,
-    MessageBoxIcon, RadioButton, GroupBox, FolderBrowserDialog,
-    SaveFileDialog
-)
-from System.Drawing import Point, Size, Font, FontStyle
 
 # ============================================================================
 # PERSISTENT PREFERENCES (last-used folder per action)
 # ============================================================================
 
-_PREFS_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_prefs.json")
-)
+import sys as _sys, os as _os
+_rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
+if _rg_root not in _sys.path:
+    _sys.path.insert(0, _rg_root)
+from ui import theme as _t
+import importlib as _importlib
+_importlib.reload(_t)
 
-
-def _prefs_get(key, fallback=None):
-    """Return the last-used folder for *key*, or *fallback* if not set / gone."""
-    try:
-        with open(_PREFS_PATH, 'r') as f:
-            folder = json.load(f).get(key)
-        if folder and os.path.isdir(folder):
-            return folder
-    except Exception:
-        pass
-    return fallback
-
-
-def _prefs_set(key, file_path):
-    """Save the directory of *file_path* as the last-used folder for *key*."""
-    try:
-        try:
-            with open(_PREFS_PATH, 'r') as f:
-                data = json.load(f)
-        except Exception:
-            data = {}
-        data[key] = os.path.dirname(file_path)
-        with open(_PREFS_PATH, 'w') as f:
-            json.dump(data, f, indent=2)
-    except Exception:
-        pass
-
+# Import Eto forms and drawing
+import Eto.Drawing as drawing
+import Eto.Forms as forms
 
 # Try to import openpyxl for Excel operations
 try:
@@ -88,164 +60,174 @@ except ImportError:
     print("Warning: openpyxl not available. Please install it using: pip install openpyxl")
 
 
-class DataExporterImporterGUI(Form):
-    """Main GUI for the Data Exporter/Importer tool"""
+
+class DataExporterImporterGUI(forms.Dialog[bool]):
+    """Main GUI for the Data Exporter/Importer tool using Eto.Forms"""
     
     def __init__(self):
-        # Initialize base Form class first
-        Form.__init__(self)
-
-        self.Text = "Rhino Data Exporter/Importer"
-        self.Size = Size(500, 420)
-        self.FormBorderStyle = FormBorderStyle.FixedDialog
-        self.MaximizeBox = False
-        self.MinimizeBox = False
-        self.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
-
-        # Create UI elements
+        super(DataExporterImporterGUI, self).__init__()
+        self.Title = "Rhino Data Exporter/Importer"
+        self.BackgroundColor = _t.BG
+        self.Resizable = False
+        self.ClientSize = drawing.Size(480, 520)
+        self.operation = None
+        
         self._create_controls()
+        self._create_layout()
         
     def _create_controls(self):
-        """Create all UI controls"""
-        y_pos = 20
+        # Section Label
+        self.op_header = _t.section_header("Select Operation:")
         
-        # Title
-        title = Label()
-        title.Text = "Select Operation:"
-        title.Location = Point(20, y_pos)
-        title.Size = Size(450, 20)
-        title.Font = Font("Arial", 10, FontStyle.Bold)
-        self.Controls.Add(title)
-        y_pos += 30
-        
-        # Export button
-        self.export_btn = Button()
+        # Export Button
+        self.export_btn = forms.Button()
         self.export_btn.Text = "1. Export Data (Select Objects → Excel)"
-        self.export_btn.Location = Point(20, y_pos)
-        self.export_btn.Size = Size(450, 40)
+        self.export_btn.Font = _t.F_SANS_B
+        self.export_btn.BackgroundColor = _t.BTN_CALC
+        self.export_btn.Height = 40
         self.export_btn.Click += self.on_export_click
-        self.Controls.Add(self.export_btn)
-        y_pos += 50
         
-        # Import button
-        self.import_btn = Button()
+        # Import Button
+        self.import_btn = forms.Button()
         self.import_btn.Text = "2. Import Data (Excel → Update Objects)"
-        self.import_btn.Location = Point(20, y_pos)
-        self.import_btn.Size = Size(450, 40)
+        self.import_btn.Font = _t.F_SANS_B
+        self.import_btn.BackgroundColor = _t.BTN_CALC
+        self.import_btn.Height = 40
         self.import_btn.Click += self.on_import_click
-        self.Controls.Add(self.import_btn)
-        y_pos += 60
         
-        # Import Options GroupBox
-        options_group = GroupBox()
-        options_group.Text = "Import Options"
-        options_group.Location = Point(20, y_pos)
-        options_group.Size = Size(450, 220)
-        self.Controls.Add(options_group)
+        # Options Header
+        self.options_header = _t.section_header("Import Options:")
         
-        opt_y = 25
-        
-        # Backup checkbox
-        self.backup_check = CheckBox()
+        # Checkboxes
+        self.backup_check = forms.CheckBox()
         self.backup_check.Text = "Create backup before import"
-        self.backup_check.Location = Point(10, opt_y)
-        self.backup_check.Size = Size(400, 20)
         self.backup_check.Checked = True
-        options_group.Controls.Add(self.backup_check)
-        opt_y += 25
         
-        # Create missing keys checkbox
-        self.create_keys_check = CheckBox()
+        self.create_keys_check = forms.CheckBox()
         self.create_keys_check.Text = "Create missing keys from Excel columns"
-        self.create_keys_check.Location = Point(10, opt_y)
-        self.create_keys_check.Size = Size(400, 20)
         self.create_keys_check.Checked = True
         self.create_keys_check.CheckedChanged += self.on_create_keys_changed
-        options_group.Controls.Add(self.create_keys_check)
-        opt_y += 25
-
-        # Radio buttons for new key creation scope
-        self.new_keys_all_radio = RadioButton()
-        self.new_keys_all_radio.Text = "Apply to all objects in Excel file"
-        self.new_keys_all_radio.Location = Point(30, opt_y)
-        self.new_keys_all_radio.Size = Size(400, 20)
-        self.new_keys_all_radio.Checked = True
-        options_group.Controls.Add(self.new_keys_all_radio)
-        opt_y += 22
-
-        self.new_keys_selected_radio = RadioButton()
-        self.new_keys_selected_radio.Text = "Apply only to pre-selected objects"
-        self.new_keys_selected_radio.Location = Point(30, opt_y)
-        self.new_keys_selected_radio.Size = Size(400, 20)
-        options_group.Controls.Add(self.new_keys_selected_radio)
-        opt_y += 30
         
-        # Update empty cells checkbox
-        self.update_empty_check = CheckBox()
+        # Radio buttons (grouped)
+        self.new_keys_all_radio = forms.RadioButton()
+        self.new_keys_all_radio.Text = "Apply to all objects in Excel file"
+        self.new_keys_all_radio.Checked = True
+        
+        self.new_keys_selected_radio = forms.RadioButton(self.new_keys_all_radio)
+        self.new_keys_selected_radio.Text = "Apply only to pre-selected objects"
+        
+        self.update_empty_check = forms.CheckBox()
         self.update_empty_check.Text = "Update values when Excel cell is empty"
-        self.update_empty_check.Location = Point(10, opt_y)
-        self.update_empty_check.Size = Size(400, 20)
         self.update_empty_check.Checked = False
         self.update_empty_check.CheckedChanged += self.on_update_empty_changed
-        options_group.Controls.Add(self.update_empty_check)
-        opt_y += 25
         
-        # Placeholder label and textbox
-        self.placeholder_label = Label()
+        # Placeholder text & label
+        self.placeholder_label = forms.Label()
         self.placeholder_label.Text = "Placeholder value (leave blank to DELETE the key):"
-        self.placeholder_label.Location = Point(30, opt_y)
-        self.placeholder_label.Size = Size(320, 20)
+        self.placeholder_label.Font = _t.F_SANS_S
+        self.placeholder_label.TextColor = _t.TEXT_MUTED
+        self.placeholder_label.VerticalAlignment = forms.VerticalAlignment.Center
         self.placeholder_label.Enabled = False
-        options_group.Controls.Add(self.placeholder_label)
         
-        self.placeholder_text = TextBox()
-        self.placeholder_text.Location = Point(350, opt_y)
-        self.placeholder_text.Size = Size(80, 20)
+        self.placeholder_text = forms.TextBox()
         self.placeholder_text.Text = "-"
+        self.placeholder_text.Width = 60
         self.placeholder_text.Enabled = False
-        options_group.Controls.Add(self.placeholder_text)
+        
+        # Close button
+        self.close_btn = forms.Button()
+        self.close_btn.Text = "Cancel"
+        self.close_btn.Font = _t.F_SANS_B
+        self.close_btn.BackgroundColor = _t.BTN_CLEAR
+        self.close_btn.Click += self.on_close_click
+        
+    def _create_layout(self):
+        # Create a beautiful options container
+        options_layout = forms.DynamicLayout()
+        options_layout.Spacing = drawing.Size(5, 8)
+        options_layout.AddRow(self.backup_check)
+        options_layout.AddRow(self.create_keys_check)
+        
+        # Indented radio options
+        radio_layout = forms.DynamicLayout()
+        radio_layout.Spacing = drawing.Size(5, 5)
+        radio_container = forms.Panel()
+        radio_container.Padding = drawing.Padding(20, 2, 0, 2)
+        radio_layout.AddRow(self.new_keys_all_radio)
+        radio_layout.AddRow(self.new_keys_selected_radio)
+        radio_container.Content = radio_layout
+        options_layout.AddRow(radio_container)
+        
+        options_layout.AddRow(self.update_empty_check)
+        
+        # Placeholder horizontal layout
+        ph_layout = forms.DynamicLayout()
+        ph_layout.Spacing = drawing.Size(10, 5)
+        ph_layout.AddRow(self.placeholder_label, self.placeholder_text)
+        
+        ph_container = forms.Panel()
+        ph_container.Padding = drawing.Padding(20, 2, 0, 2)
+        ph_container.Content = ph_layout
+        options_layout.AddRow(ph_container)
+        
+        # Options Panel
+        options_panel = forms.Panel()
+        options_panel.BackgroundColor = _t.PANEL
+        options_panel.Padding = drawing.Padding(15)
+        options_panel.Content = options_layout
+        
+        # Main Layout
+        main_layout = forms.DynamicLayout()
+        main_layout.Spacing = drawing.Size(10, 10)
+        main_layout.Padding = drawing.Padding(20)
+        
+        main_layout.AddRow(self.op_header)
+        main_layout.AddRow(self.export_btn)
+        main_layout.AddRow(self.import_btn)
+        main_layout.AddRow(None) # Spacer
+        main_layout.AddRow(self.options_header)
+        main_layout.AddRow(options_panel)
+        main_layout.AddRow(None) # Spacer
+        main_layout.AddRow(self.close_btn)
+        
+        self.Content = main_layout
         
     def on_create_keys_changed(self, sender, event):
-        """Enable/disable radio buttons based on create keys checkbox state"""
         enabled = self.create_keys_check.Checked
         self.new_keys_all_radio.Enabled = enabled
         self.new_keys_selected_radio.Enabled = enabled
-
+        
     def on_update_empty_changed(self, sender, event):
-        """Enable/disable placeholder controls based on checkbox state"""
         enabled = self.update_empty_check.Checked
         self.placeholder_label.Enabled = enabled
         self.placeholder_text.Enabled = enabled
         
     def on_export_click(self, sender, event):
-        """Handle export button click"""
         if not EXCEL_AVAILABLE:
-            MessageBox.Show(
+            forms.MessageBox.Show(
                 "openpyxl library is not available.\nPlease install it using: pip install openpyxl",
                 "Missing Dependency",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error
+                forms.MessageBoxButtons.OK,
+                forms.MessageBoxType.Error
             )
             return
-        
-        self.DialogResult = DialogResult.OK
-        self.Tag = "export"
-        self.Close()
+        self.operation = "export"
+        self.Close(True)
         
     def on_import_click(self, sender, event):
-        """Handle import button click"""
         if not EXCEL_AVAILABLE:
-            MessageBox.Show(
+            forms.MessageBox.Show(
                 "openpyxl library is not available.\nPlease install it using: pip install openpyxl",
                 "Missing Dependency",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error
+                forms.MessageBoxButtons.OK,
+                forms.MessageBoxType.Error
             )
             return
+        self.operation = "import"
+        self.Close(True)
         
-        self.DialogResult = DialogResult.OK
-        self.Tag = "import"
-        self.Close()
+    def on_close_click(self, sender, event):
+        self.Close(False)
 
 
 def export_data_to_excel():
@@ -303,21 +285,19 @@ def export_data_to_excel():
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     default_filename = f"RhinoData_{timestamp}.xlsx"
 
-    save_dialog = SaveFileDialog()
-    save_dialog.Filter = "Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*"
-    save_dialog.FileName = default_filename
-    save_dialog.Title = "Save Excel File"
-    save_dialog.DefaultExt = "xlsx"
-    folder = _prefs_get('arriero_export')
-    if folder:
-        save_dialog.InitialDirectory = folder
-
-    if save_dialog.ShowDialog() != DialogResult.OK:
+    folder = _t.prefs_get('arriero_export')
+    filepath = rs.SaveFileName(
+        title="Save Excel File",
+        filter="Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*||",
+        folder=folder,
+        filename=default_filename,
+        extension="xlsx"
+    )
+    if not filepath:
         print("Export cancelled by user.")
         return
 
-    filepath = save_dialog.FileName
-    _prefs_set('arriero_export', filepath)
+    _t.prefs_set('arriero_export', filepath)
 
     # Save workbook
     try:
@@ -326,22 +306,22 @@ def export_data_to_excel():
         print(f"File saved: {filepath}")
         print(f"Exported {len(object_data)} objects with {len(sorted_keys)} keys.")
 
-        MessageBox.Show(
+        forms.MessageBox.Show(
             f"Export successful!\n\n"
             f"Objects: {len(object_data)}\n"
             f"Keys: {len(sorted_keys)}\n\n"
             f"File: {os.path.basename(filepath)}",
             "Export Complete",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information
+            forms.MessageBoxButtons.OK,
+            forms.MessageBoxType.Information
         )
     except Exception as e:
         print(f"Error saving Excel file: {e}")
-        MessageBox.Show(
+        forms.MessageBox.Show(
             f"Error saving Excel file:\n{e}",
             "Export Error",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Error
+            forms.MessageBoxButtons.OK,
+            forms.MessageBoxType.Error
         )
 
 
@@ -362,45 +342,43 @@ def import_data_from_excel(create_backup, create_missing_keys,
     if only_selected and create_missing_keys:
         selected_objects = rs.SelectedObjects()
         if not selected_objects:
-            MessageBox.Show(
+            forms.MessageBox.Show(
                 "No objects are selected.\n\n"
                 "Please select objects first if you want to use\n"
                 "'Apply only to pre-selected objects' option.",
                 "No Selection",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning
+                forms.MessageBoxButtons.OK,
+                forms.MessageBoxType.Warning
             )
             return
         selected_guids = set(str(obj) for obj in selected_objects)
         print(f"Pre-selected {len(selected_guids)} objects for new key creation.")
 
     # Open file dialog to select Excel file
-    dialog = OpenFileDialog()
-    dialog.Filter = "Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*"
-    dialog.Title = "Select Excel file to import"
-    folder = _prefs_get('arriero_import')
-    if folder:
-        dialog.InitialDirectory = folder
-
-    if dialog.ShowDialog() != DialogResult.OK:
+    folder = _t.prefs_get('arriero_import')
+    filepath = rs.OpenFileName(
+        title="Select Excel file to import",
+        filter="Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*||",
+        folder=folder
+    )
+    if not filepath:
         print("Import cancelled.")
         return
 
-    filepath = dialog.FileName
-    _prefs_set('arriero_import', filepath)
+    _t.prefs_set('arriero_import', filepath)
     print(f"Selected file: {filepath}")
     
     # Create backup if requested
     if create_backup:
-        result = MessageBox.Show(
+        result = forms.MessageBox.Show(
             "Do you want to create a backup before importing?\n\n"
             "This will export all current object data to a new Excel file.",
             "Create Backup",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Question
+            forms.MessageBoxButtons.YesNo,
+            forms.MessageBoxType.Question
         )
 
-        if result == DialogResult.Yes:
+        if result == forms.MessageBoxResult.Yes:
             print("\nCreating backup before import...")
             # Get all objects in document for backup
             all_objects = rs.AllObjects()
@@ -419,11 +397,11 @@ def import_data_from_excel(create_backup, create_missing_keys,
         ws = wb.active
     except Exception as e:
         print(f"Error loading Excel file: {e}")
-        MessageBox.Show(
+        forms.MessageBox.Show(
             f"Error loading Excel file:\n{e}",
             "Import Error",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Error
+            forms.MessageBoxButtons.OK,
+            forms.MessageBoxType.Error
         )
         return
     
@@ -435,11 +413,11 @@ def import_data_from_excel(create_backup, create_missing_keys,
     
     if not headers or headers[0] != "GUID":
         print("Error: First column must be 'GUID'")
-        MessageBox.Show(
+        forms.MessageBox.Show(
             "Invalid Excel format.\nFirst column must be 'GUID'.",
             "Import Error",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Error
+            forms.MessageBoxButtons.OK,
+            forms.MessageBoxType.Error
         )
         return
     
@@ -564,11 +542,11 @@ def import_data_from_excel(create_backup, create_missing_keys,
     print(summary_msg)
     print("="*50)
     
-    MessageBox.Show(
+    forms.MessageBox.Show(
         summary_msg,
         "Import Summary",
-        MessageBoxButtons.OK,
-        MessageBoxIcon.Information
+        forms.MessageBoxButtons.OK,
+        forms.MessageBoxType.Information
     )
 
 
@@ -591,10 +569,10 @@ def main():
     
     # Show GUI
     gui = DataExporterImporterGUI()
-    result = gui.ShowDialog()
+    result = gui.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow)
     
-    if result == DialogResult.OK:
-        operation = gui.Tag
+    if result:
+        operation = gui.operation
 
         if operation == "export":
             export_data_to_excel()

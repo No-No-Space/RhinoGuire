@@ -49,16 +49,16 @@ import importlib as _importlib; _importlib.reload(_t)
 
 def get_all_user_text_keys():
     """Collect all unique user text keys from every object in the model, sorted."""
-    all_objects = rs.AllObjects()
-    if not all_objects:
-        return []
     keys = set()
-    for obj_guid in all_objects:
-        obj_keys = rs.GetUserText(obj_guid)  # returns list of key strings, or None
-        if obj_keys:
-            for k in obj_keys:
-                keys.add(k)
-    return sorted(keys)
+    doc = Rhino.RhinoDoc.ActiveDoc
+    if doc:
+        for rhino_obj in doc.Objects:
+            if rhino_obj and rhino_obj.Attributes:
+                user_strings = rhino_obj.Attributes.GetUserStrings()
+                if user_strings:
+                    for key in user_strings.AllKeys:
+                        keys.add(key)
+    return sorted(list(keys))
 
 
 class SearchCondition:
@@ -69,9 +69,8 @@ class SearchCondition:
         self.match_type = match_type  # "contains", "equals", "starts_with", "ends_with"
         self.is_exclude = is_exclude
 
-    def matches(self, obj_guid):
-        """Check if the object matches this condition."""
-        obj_value = rs.GetUserText(obj_guid, self.key)
+    def matches_value(self, obj_value):
+        """Check if the text value matches this condition."""
         if obj_value is None:
             return False
 
@@ -480,17 +479,31 @@ def perform_search(objects_to_search, include_conditions, exclude_conditions):
     - Objects matching ANY exclude condition are removed
     """
     results = []
+    doc = Rhino.RhinoDoc.ActiveDoc
+    if not doc:
+        return results
 
     for obj in objects_to_search:
+        guid = rs.coerceguid(obj)
+        rhino_obj = doc.Objects.FindId(guid)
+        if not rhino_obj or not rhino_obj.Attributes:
+            continue
+
         # Check all include conditions (AND logic)
         if include_conditions:
-            matches_all_includes = all(cond.matches(obj) for cond in include_conditions)
+            matches_all_includes = all(
+                cond.matches_value(rhino_obj.Attributes.GetUserString(cond.key))
+                for cond in include_conditions
+            )
             if not matches_all_includes:
                 continue
 
         # Check exclude conditions (OR logic - any match excludes)
         if exclude_conditions:
-            matches_any_exclude = any(cond.matches(obj) for cond in exclude_conditions)
+            matches_any_exclude = any(
+                cond.matches_value(rhino_obj.Attributes.GetUserString(cond.key))
+                for cond in exclude_conditions
+            )
             if matches_any_exclude:
                 continue
 

@@ -43,36 +43,15 @@ from collections import defaultdict
 # PERSISTENT PREFERENCES (last-used folder per action)
 # ============================================================================
 
-_PREFS_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_prefs.json")
-)
+import sys as _sys, os as _os
+_rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
+if _rg_root not in _sys.path:
+    _sys.path.insert(0, _rg_root)
+from ui import theme as _t
+import importlib as _importlib; _importlib.reload(_t)
 
-
-def _prefs_get(key, fallback=None):
-    """Return the last-used folder for *key*, or *fallback* if not set / gone."""
-    try:
-        with open(_PREFS_PATH, 'r') as f:
-            folder = json.load(f).get(key)
-        if folder and os.path.isdir(folder):
-            return folder
-    except Exception:
-        pass
-    return fallback
-
-
-def _prefs_set(key, file_path):
-    """Save the directory of *file_path* as the last-used folder for *key*."""
-    try:
-        try:
-            with open(_PREFS_PATH, 'r') as f:
-                data = json.load(f)
-        except Exception:
-            data = {}
-        data[key] = os.path.dirname(file_path)
-        with open(_PREFS_PATH, 'w') as f:
-            json.dump(data, f, indent=2)
-    except Exception:
-        pass
+_prefs_get = _t.prefs_get
+_prefs_set = _t.prefs_set
 
 # Import openpyxl for Excel operations
 try:
@@ -90,12 +69,6 @@ import Eto.Forms as forms
 # Import System.Drawing for PNG export
 import System.Drawing as sdrawing
 
-import sys as _sys, os as _os
-_rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
-if _rg_root not in _sys.path:
-    _sys.path.insert(0, _rg_root)
-from ui import theme as _t
-import importlib as _importlib; _importlib.reload(_t)
 
 
 # ============================================================================

@@ -80,36 +80,8 @@ import importlib as _importlib; _importlib.reload(_t)
 # PERSISTENT PREFERENCES (last-used folder per action)
 # ============================================================================
 
-_PREFS_PATH = _os.path.normpath(
-    _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "_prefs.json")
-)
-
-
-def _prefs_get(key, fallback=None):
-    """Return the last-used folder for *key*, or *fallback* if not set / gone."""
-    try:
-        with open(_PREFS_PATH, 'r') as f:
-            folder = json.load(f).get(key)
-        if folder and _os.path.isdir(folder):
-            return folder
-    except Exception:
-        pass
-    return fallback
-
-
-def _prefs_set(key, file_path):
-    """Save the directory of *file_path* as the last-used folder for *key*."""
-    try:
-        try:
-            with open(_PREFS_PATH, 'r') as f:
-                data = json.load(f)
-        except Exception:
-            data = {}
-        data[key] = _os.path.dirname(file_path)
-        with open(_PREFS_PATH, 'w') as f:
-            json.dump(data, f, indent=2)
-    except Exception:
-        pass
+_prefs_get = _t.prefs_get
+_prefs_set = _t.prefs_set
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -118,16 +90,16 @@ def _prefs_set(key, file_path):
 
 def get_all_user_text_keys():
     """Return sorted list of unique user text keys found on any object in the model."""
-    all_objects = rs.AllObjects()
-    if not all_objects:
-        return []
     keys = set()
-    for guid in all_objects:
-        obj_keys = rs.GetUserText(guid)
-        if obj_keys:
-            for k in obj_keys:
-                keys.add(k)
-    return sorted(keys)
+    doc = Rhino.RhinoDoc.ActiveDoc
+    if doc:
+        for rhino_obj in doc.Objects:
+            if rhino_obj and rhino_obj.Attributes:
+                user_strings = rhino_obj.Attributes.GetUserStrings()
+                if user_strings:
+                    for key in user_strings.AllKeys:
+                        keys.add(key)
+    return sorted(list(keys))
 
 
 def all_layer_names():

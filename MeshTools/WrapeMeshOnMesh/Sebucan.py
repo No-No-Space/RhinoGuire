@@ -30,12 +30,20 @@
 # _____________________________________________________________________
 
 import System
+import System.Drawing as sd
 import rhinoscriptsyntax as rs
 import Rhino
 import Rhino.Geometry as rg
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 import scriptcontext as sc
+
+import sys as _sys, os as _os
+_rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+if _rg_root not in _sys.path:
+    _sys.path.insert(0, _rg_root)
+from ui import theme as _t
+import importlib as _importlib; _importlib.reload(_t)
 
 # Selection filter: mesh + surface (trimmed included) + polysurface + SubD
 _DEST_FILTER = rs.filter.mesh | rs.filter.surface | rs.filter.polysurface
@@ -181,6 +189,9 @@ def adaptive_wrap_mesh(source_mesh, dest_mesh, tolerance, max_iterations):
     The loop repeats until no face fails the tolerance test or `max_iterations`
     is reached. Faces over flat terrain are never split.
 
+    Also detects and linearly interpolates texture coordinates (UVs) and vertex colors
+    for newly subdivided vertices.
+
     Returns: (refined_mesh, total_vertices_projected, miss_count)
     """
     project_z = _make_projector(dest_mesh)
@@ -194,6 +205,16 @@ def adaptive_wrap_mesh(source_mesh, dest_mesh, tolerance, max_iterations):
     for fi in range(work.Faces.Count):
         f = work.Faces[fi]
         faces.append((f.A, f.B, f.C))
+
+    # Extract UVs if they exist
+    uvs = None
+    if work.TextureCoordinates.Count >= work.Vertices.Count:
+        uvs = [[float(work.TextureCoordinates[i].X), float(work.TextureCoordinates[i].Y)] for i in range(work.Vertices.Count)]
+
+    # Extract Vertex Colors if they exist
+    colors = None
+    if work.VertexColors.Count >= work.Vertices.Count:
+        colors = [[int(work.VertexColors[i].R), int(work.VertexColors[i].G), int(work.VertexColors[i].B), int(work.VertexColors[i].A)] for i in range(work.Vertices.Count)]
 
     # Project initial vertices
     miss_count = 0
@@ -218,9 +239,9 @@ def adaptive_wrap_mesh(source_mesh, dest_mesh, tolerance, max_iterations):
 
             # Midpoint coords + interpolated Z for each of the 3 edges
             edge_def = [
-                (i0, i1, (v0[0]+v1[0])/2, (v0[1]+v1[1])/2, (v0[2]+v1[2])/2),
-                (i1, i2, (v1[0]+v2[0])/2, (v1[1]+v2[1])/2, (v1[2]+v2[2])/2),
-                (i2, i0, (v2[0]+v0[0])/2, (v2[1]+v0[1])/2, (v2[2]+v0[2])/2),
+                (i0, i1, (v0[0]+v1[0])/2.0, (v0[1]+v1[1])/2.0, (v0[2]+v1[2])/2.0),
+                (i1, i2, (v1[0]+v2[0])/2.0, (v1[1]+v2[1])/2.0, (v1[2]+v2[2])/2.0),
+                (i2, i0, (v2[0]+v0[0])/2.0, (v2[1]+v0[1])/2.0, (v2[2]+v0[2])/2.0),
             ]
 
             # Evaluate terrain Z at each midpoint and check deviation
@@ -230,7 +251,23 @@ def adaptive_wrap_mesh(source_mesh, dest_mesh, tolerance, max_iterations):
                 true_z = project_z(mx, my)
                 if true_z is None:
                     true_z = interp_z          # outside destination — keep interpolated
-                mid_data.append((ia, ib, mx, my, true_z))
+                
+                # Compute interpolated UV
+                muv = None
+                if uvs:
+                    muv = [(uvs[ia][0] + uvs[ib][0])/2.0, (uvs[ia][1] + uvs[ib][1])/2.0]
+                
+                # Compute interpolated Color
+                mcol = None
+                if colors:
+                    mcol = [
+                        int(round((colors[ia][0] + colors[ib][0])/2.0)),
+                        int(round((colors[ia][1] + colors[ib][1])/2.0)),
+                        int(round((colors[ia][2] + colors[ib][2])/2.0)),
+                        int(round((colors[ia][3] + colors[ib][3])/2.0)),
+                    ]
+                
+                mid_data.append((ia, ib, mx, my, true_z, muv, mcol))
                 if abs(true_z - interp_z) > tolerance:
                     needs_split = True
 
@@ -241,11 +278,15 @@ def adaptive_wrap_mesh(source_mesh, dest_mesh, tolerance, max_iterations):
             # Split: get or create the three midpoint vertices
             any_split = True
             mid_idxs  = []
-            for ia, ib, mx, my, mz in mid_data:
+            for ia, ib, mx, my, mz, muv, mcol in mid_data:
                 key = (min(ia, ib), max(ia, ib))
                 if key not in edge_vert:
                     edge_vert[key] = len(verts)
                     verts.append([mx, my, mz])
+                    if uvs:
+                        uvs.append(muv)
+                    if colors:
+                        colors.append(mcol)
                 mid_idxs.append(edge_vert[key])
 
             m01, m12, m20 = mid_idxs
@@ -264,6 +305,15 @@ def adaptive_wrap_mesh(source_mesh, dest_mesh, tolerance, max_iterations):
     result = rg.Mesh()
     for v in verts:
         result.Vertices.Add(v[0], v[1], v[2])
+
+    if uvs:
+        for uv in uvs:
+            result.TextureCoordinates.Add(uv[0], uv[1])
+
+    if colors:
+        for c in colors:
+            result.VertexColors.Add(sd.Color.FromArgb(c[3], c[0], c[1], c[2]))
+
     for f in faces:
         result.Faces.AddFace(f[0], f[1], f[2])
     result.Normals.ComputeNormals()
@@ -283,7 +333,8 @@ class SebucanForm(forms.Form):
         super().__init__()
         self.Title     = "Sebucan — Wrap Mesh on Mesh"
         self.Resizable = True
-        self.Padding   = drawing.Padding(10)
+        self.Padding   = drawing.Padding(12)
+        self.BackgroundColor = _t.BG
         self.MinimumSize = drawing.Size(380, 460)
         self.ClientSize  = drawing.Size(420, 540)
         self.Owner     = Rhino.UI.RhinoEtoApp.MainWindow
@@ -302,59 +353,43 @@ class SebucanForm(forms.Form):
         layout.DefaultSpacing = drawing.Size(5, 5)
 
         # Header
-        title_lbl = forms.Label()
-        title_lbl.Text = "Wrap Mesh on Mesh"
-        title_lbl.Font = drawing.Font(drawing.SystemFont.Bold, 12)
+        title_lbl = _t.lbl("Wrap Mesh on Mesh", _t.F_HEAD, _t.TEXT)
         layout.AddRow(title_lbl)
 
-        desc_lbl = forms.Label()
-        desc_lbl.Text = "Projects source vertices onto the destination\nmesh along the Z axis."
-        desc_lbl.TextColor = drawing.Colors.Gray
+        desc_lbl = _t.hint("Projects source vertices onto the destination\nmesh along the Z axis.")
         layout.AddRow(desc_lbl)
 
         layout.AddRow(None)
 
         # Step 1 — Destination
-        s1_lbl = forms.Label()
-        s1_lbl.Text = "1 — Destination  (mesh, SubD, polysurface…)"
-        s1_lbl.Font = drawing.Font(drawing.SystemFont.Bold)
+        s1_lbl = _t.lbl("1 — Destination  (mesh, SubD, polysurface…)", _t.F_SANS_B, _t.TEXT)
         layout.AddRow(s1_lbl)
 
-        self.dest_btn = forms.Button()
-        self.dest_btn.Text = "Select Destination"
+        self.dest_btn = _t.btn("Select Destination")
         self.dest_btn.Click += self.on_select_destination
         layout.AddRow(self.dest_btn)
 
-        self.dest_info = forms.Label()
-        self.dest_info.Text = "No destination selected."
-        self.dest_info.TextColor = drawing.Colors.Gray
+        self.dest_info = _t.lbl("No destination selected.", _t.F_SANS, _t.TEXT_MUTED)
         layout.AddRow(self.dest_info)
 
         layout.AddRow(None)
 
         # Step 2 — Sources
-        s2_lbl = forms.Label()
-        s2_lbl.Text = "2 — Source  (mesh, surface, polysurface…)"
-        s2_lbl.Font = drawing.Font(drawing.SystemFont.Bold)
+        s2_lbl = _t.lbl("2 — Source  (mesh, surface, polysurface…)", _t.F_SANS_B, _t.TEXT)
         layout.AddRow(s2_lbl)
 
-        self.src_btn = forms.Button()
-        self.src_btn.Text = "Select Source(s)"
+        self.src_btn = _t.btn("Select Source(s)")
         self.src_btn.Enabled = False
         self.src_btn.Click += self.on_select_sources
         layout.AddRow(self.src_btn)
 
-        self.src_info = forms.Label()
-        self.src_info.Text = "No source objects selected."
-        self.src_info.TextColor = drawing.Colors.Gray
+        self.src_info = _t.lbl("No source objects selected.", _t.F_SANS, _t.TEXT_MUTED)
         layout.AddRow(self.src_info)
 
         layout.AddRow(None)
 
         # Options
-        opts_lbl = forms.Label()
-        opts_lbl.Text = "Options"
-        opts_lbl.Font = drawing.Font(drawing.SystemFont.Bold)
+        opts_lbl = _t.lbl("Options", _t.F_SANS_B, _t.TEXT)
         layout.AddRow(opts_lbl)
 
         self.replace_check = forms.CheckBox()
@@ -368,24 +403,19 @@ class SebucanForm(forms.Form):
         self.adaptive_check.CheckedChanged += self.on_adaptive_changed
         layout.AddRow(self.adaptive_check)
 
-        adapt_hint = forms.Label()
-        adapt_hint.Text = "Splits faces where terrain Z deviation exceeds tolerance."
-        adapt_hint.TextColor = drawing.Colors.Gray
+        adapt_hint = _t.hint("Splits faces where terrain Z deviation exceeds tolerance.")
         layout.AddRow(adapt_hint)
 
         tol_row = forms.StackLayout()
         tol_row.Orientation = forms.Orientation.Horizontal
         tol_row.Spacing = 8
-        tol_lbl = forms.Label()
-        tol_lbl.Text = "Tolerance:"
+        tol_lbl = _t.lbl("Tolerance:", _t.F_SANS, _t.TEXT)
         tol_lbl.Width = 80
         self.tol_input = forms.TextBox()
         self.tol_input.Text = "0.1"
         self.tol_input.Width = 55
         self.tol_input.Enabled = False
-        tol_units = forms.Label()
-        tol_units.Text = "(Z units)"
-        tol_units.TextColor = drawing.Colors.Gray
+        tol_units = _t.lbl("(Z units)", _t.F_SANS_S, _t.TEXT_MUTED)
         tol_row.Items.Add(forms.StackLayoutItem(tol_lbl))
         tol_row.Items.Add(forms.StackLayoutItem(self.tol_input))
         tol_row.Items.Add(forms.StackLayoutItem(tol_units))
@@ -394,8 +424,7 @@ class SebucanForm(forms.Form):
         iter_row = forms.StackLayout()
         iter_row.Orientation = forms.Orientation.Horizontal
         iter_row.Spacing = 8
-        iter_lbl = forms.Label()
-        iter_lbl.Text = "Max. passes:"
+        iter_lbl = _t.lbl("Max. passes:", _t.F_SANS, _t.TEXT)
         iter_lbl.Width = 80
         self.iter_drop = forms.DropDown()
         for v in _ITER_VALUES:
@@ -409,8 +438,7 @@ class SebucanForm(forms.Form):
         layout.AddRow(None)
 
         # Wrap button
-        self.wrap_btn = forms.Button()
-        self.wrap_btn.Text = "Wrap!"
+        self.wrap_btn = _t.btn("Wrap!", _t.BTN_CALC)
         self.wrap_btn.Enabled = False
         self.wrap_btn.Click += self.on_wrap
         layout.AddRow(self.wrap_btn)
@@ -418,14 +446,11 @@ class SebucanForm(forms.Form):
         layout.AddRow(None)
 
         # Status
-        self.status_lbl = forms.Label()
-        self.status_lbl.Text = "Ready — select a destination mesh to begin."
-        self.status_lbl.TextColor = drawing.Colors.Gray
+        self.status_lbl = _t.lbl("Ready — select a destination mesh to begin.", _t.F_SANS, _t.TEXT_MUTED)
         layout.AddRow(self.status_lbl)
 
         # Close
-        close_btn = forms.Button()
-        close_btn.Text = "Close"
+        close_btn = _t.btn("Close", _t.BTN_CLEAR)
         close_btn.Click += lambda s, e: self.Close()
         layout.AddRow(close_btn)
 
@@ -437,7 +462,7 @@ class SebucanForm(forms.Form):
 
     def _set_status(self, text, color=None):
         self.status_lbl.Text  = text
-        self.status_lbl.TextColor = color if color is not None else drawing.Colors.Gray
+        self.status_lbl.TextColor = color if color is not None else _t.TEXT_MUTED
 
     def _update_wrap_btn(self):
         self.wrap_btn.Enabled = (self.dest_id is not None) and (len(self.source_ids) > 0)
@@ -456,16 +481,16 @@ class SebucanForm(forms.Form):
         obj_id = rs.GetObject("Select destination (mesh, SubD, polysurface)", _DEST_FILTER, preselect=True)
 
         if obj_id is None:
-            self._set_status("Destination selection cancelled.")
+            self._set_status("Destination selection cancelled.", _t.status_color("warn"))
             return
 
         self.dest_id = obj_id
         name = rs.ObjectName(obj_id) or "(unnamed)"
         type_label = _obj_type_label(obj_id)
         self.dest_info.Text = f"\u2713 {name}  [{type_label}]"
-        self.dest_info.TextColor = drawing.Colors.Green
+        self.dest_info.TextColor = _t.TEXT_OK
         self.src_btn.Enabled = True
-        self._set_status("Destination set. Now select source object(s).")
+        self._set_status("Destination set. Now select source object(s).", _t.status_color("info"))
         self._update_wrap_btn()
 
     def on_select_sources(self, sender, e):
@@ -473,14 +498,14 @@ class SebucanForm(forms.Form):
         obj_ids = rs.GetObjects("Select source (mesh, surface, polysurface, SubD)", _SRC_FILTER, preselect=True)
 
         if not obj_ids:
-            self._set_status("Source selection cancelled.")
+            self._set_status("Source selection cancelled.", _t.status_color("warn"))
             return
 
         self.source_ids = list(obj_ids)
         n = len(self.source_ids)
         self.src_info.Text = f"\u2713 {n} object(s) selected"
-        self.src_info.TextColor = drawing.Colors.Green
-        self._set_status(f"{n} source object(s) ready. Click Wrap! to process.")
+        self.src_info.TextColor = _t.TEXT_OK
+        self._set_status(f"{n} source object(s) ready. Click Wrap! to process.", _t.status_color("info"))
         self._update_wrap_btn()
 
     # ------------------------------------------------------------------
@@ -493,7 +518,7 @@ class SebucanForm(forms.Form):
 
         dest_mesh = coerce_to_mesh(self.dest_id)
         if dest_mesh is None:
-            self._set_status("Error: could not convert destination to mesh.", drawing.Colors.Red)
+            self._set_status("Error: could not convert destination to mesh.", _t.status_color("error"))
             self.wrap_btn.Enabled = True
             return
 
@@ -524,6 +549,15 @@ class SebucanForm(forms.Form):
             obj_name   = rs.ObjectName(src_id)
             orig_count = src_mesh.Vertices.Count
 
+            # Retrieve user strings
+            user_text = {}
+            keys = rs.GetUserText(src_id)
+            if keys:
+                for key in keys:
+                    val = rs.GetUserText(src_id, key)
+                    if val is not None:
+                        user_text[key] = val
+
             if use_adaptive:
                 wrapped, hits, misses = adaptive_wrap_mesh(src_mesh, dest_mesh, tol, max_iter)
                 total_added += wrapped.Vertices.Count - orig_count
@@ -541,6 +575,8 @@ class SebucanForm(forms.Form):
                 rs.ObjectLayer(new_id, obj_layer)
                 if obj_name:
                     rs.ObjectName(new_id, obj_name)
+                for key, val in user_text.items():
+                    rs.SetUserText(new_id, key, val)
                 results_added += 1
 
         sc.doc.Views.Redraw()
@@ -550,7 +586,7 @@ class SebucanForm(forms.Form):
             msg += f" {total_added} vertices added by refinement."
         if total_miss > 0:
             msg += f" {total_miss} outside destination — original Z kept."
-        self._set_status(msg, drawing.Colors.Green)
+        self._set_status(msg, _t.status_color("ok"))
         self.wrap_btn.Enabled = True
 
 

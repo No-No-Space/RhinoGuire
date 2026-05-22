@@ -148,3 +148,45 @@ def status_color(state):
         "error": TEXT_ERROR,
         "info":  TEXT_MUTED,
     }.get(state, TEXT_MUTED)
+
+
+_PREFS_PATH = None
+
+def _get_prefs_path():
+    global _PREFS_PATH
+    if _PREFS_PATH is None:
+        import os
+        _PREFS_PATH = os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_prefs.json")
+        )
+    return _PREFS_PATH
+
+def prefs_get(key, fallback=None):
+    """Return the last-used folder for *key*, or *fallback* if not set / gone."""
+    import os, json
+    try:
+        path = _get_prefs_path()
+        with open(path, 'r') as f:
+            folder = json.load(f).get(key)
+        if folder and os.path.isdir(folder):
+            return folder
+    except Exception:
+        pass
+    return fallback
+
+def prefs_set(key, file_path):
+    """Save the directory of *file_path* as the last-used folder for *key*."""
+    import os, json
+    try:
+        path = _get_prefs_path()
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        data[key] = os.path.dirname(file_path)
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
