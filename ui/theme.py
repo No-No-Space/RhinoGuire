@@ -10,45 +10,108 @@
 import Eto.Drawing as drawing
 import Eto.Forms  as forms
 
-# ── Palette ───────────────────────────────────────────────────────────────────
+# ── Palette (AAJ Design System) ───────────────────────────────────────────────
 
-BG           = drawing.Color.FromArgb(248, 244, 235)   # warm cream — form background
-PANEL        = drawing.Color.FromArgb(255, 255, 255)   # white — content panels
-HEADER       = drawing.Color.FromArgb(255, 240, 120)   # soft yellow — section headers, active tab
-ROW_ALT      = drawing.Color.FromArgb(241, 237, 227)   # subtle stripe — alternate table rows
-TOTAL_BG     = drawing.Color.FromArgb(195, 231, 192)   # soft green — totals / success rows
-BTN_CALC     = drawing.Color.FromArgb(168, 210, 255)   # soft blue — primary action (Calculate)
-BTN_CLEAR    = drawing.Color.FromArgb(255, 188, 188)   # soft red — destructive action (Clear)
-BTN_DEFAULT  = drawing.Color.FromArgb(218, 213, 203)   # warm gray — neutral buttons / status bar
-TAB_ACTIVE   = drawing.Color.FromArgb(255, 240, 120)   # same as HEADER
-TAB_INACTIVE = drawing.Color.FromArgb(232, 228, 219)   # muted warm — inactive tabs
-BORDER       = drawing.Color.FromArgb(18,  18,  18)    # near-black — hard borders / gaps
+# Anchors
+BG           = drawing.Color.FromArgb(247, 243, 236)   # Hueso-based page bg (#F7F3EC)
+PANEL        = drawing.Color.FromArgb(242, 237, 230)   # Hueso surface (#F2EDE6)
+BORDER       = drawing.Color.FromArgb(42,  39,  37)    # Carbón near-black (#2A2725)
+TEXT         = drawing.Color.FromArgb(42,  39,  37)    # Carbón primary text (#2A2725)
 
-TEXT         = drawing.Color.FromArgb(18,  18,  18)    # near-black — primary text
-TEXT_MUTED   = drawing.Color.FromArgb(98,  93,  85)    # warm gray — hints / descriptions
-TEXT_ERROR   = drawing.Color.FromArgb(180, 50,  50)    # soft red — errors
-TEXT_WARN    = drawing.Color.FromArgb(180, 110, 20)    # amber — warnings
-TEXT_OK      = drawing.Color.FromArgb(50,  130, 60)    # soft green — success
+# Accent colors
+HEADER       = drawing.Color.FromArgb(42,  139, 156)   # Mar Caribe teal (#2A8B9C)
+TAB_ACTIVE   = drawing.Color.FromArgb(42,  139, 156)   # Mar Caribe teal (#2A8B9C)
+TAB_INACTIVE = drawing.Color.FromArgb(230, 225, 216)   # Muted warm grey (#E6E1D8)
+ROW_ALT      = drawing.Color.FromArgb(234, 229, 222)   # Subtle alternate row tint (#EAE5DE)
+TOTAL_BG     = drawing.Color.FromArgb(213, 234, 223)   # Soft success green (based on #5BA67A)
+
+# Buttons
+BTN_CALC     = drawing.Color.FromArgb(42,  139, 156)   # Mar Caribe teal (#2A8B9C)
+BTN_CLEAR    = drawing.Color.FromArgb(224, 115, 92)    # Salmon red-orange (#E0735C)
+BTN_DEFAULT  = drawing.Color.FromArgb(242, 237, 230)   # Hueso neutral buttons (#F2EDE6)
+
+# Semantic Text
+TEXT_MUTED   = drawing.Color.FromArgb(138, 133, 128)   # Tierra warm grey (#8A8580)
+TEXT_OK      = drawing.Color.FromArgb(91,  166, 122)   # Success Green (#5BA67A)
+TEXT_WARN    = drawing.Color.FromArgb(229, 162, 59)    # Warning Yellow (#E5A23B)
+TEXT_ERROR   = drawing.Color.FromArgb(196, 74,  63)    # Error Red (#C44A3F)
 
 # Chart-specific (bullet chart — R1/R2)
-CHART_BG     = drawing.Color.FromArgb(218, 213, 203)   # warm gray — bar background
-CHART_LOW    = drawing.Color.FromArgb(255, 235, 130)   # soft yellow — below-target zone
-CHART_HIGH   = drawing.Color.FromArgb(255, 195, 100)   # soft orange — above-target zone
-CHART_BAR    = drawing.Color.FromArgb(100, 140, 190)   # muted blue — measured value bar
-CHART_GOAL   = drawing.Color.FromArgb(18,  18,  18)    # near-black — goal line
-CHART_TOL    = drawing.Color.FromArgb(140, 135, 128)   # warm gray — tolerance markers
-CHART_LABEL  = drawing.Color.FromArgb(18,  18,  18)    # primary text — chart labels
-CHART_DELTA  = drawing.Color.FromArgb(98,  93,  85)    # muted — delta % annotation
-CHART_NOTGT  = drawing.Color.FromArgb(160, 80,  60)    # terracotta — no-target warning
+CHART_BG     = drawing.Color.FromArgb(216, 211, 202)   # Lighter Tierra (#D8D3CA)
+CHART_LOW    = drawing.Color.FromArgb(229, 176, 86)    # Sol de Maíz yellow (#E5B056)
+CHART_HIGH   = drawing.Color.FromArgb(224, 115, 92)    # Salmon red-orange (#E0735C)
+CHART_BAR    = drawing.Color.FromArgb(42,  139, 156)   # Mar Caribe teal (#2A8B9C)
+CHART_GOAL   = drawing.Color.FromArgb(42,  39,  37)    # Carbón near-black (#2A2725)
+CHART_TOL    = drawing.Color.FromArgb(138, 133, 128)   # Tierra warm grey (#8A8580)
+CHART_LABEL  = drawing.Color.FromArgb(42,  39,  37)    # Carbón primary text (#2A2725)
+CHART_DELTA  = drawing.Color.FromArgb(138, 133, 128)   # Tierra warm grey (#8A8580)
+CHART_NOTGT  = drawing.Color.FromArgb(196, 74,  63)    # Error Red (#C44A3F)
+
+# ── Spacing (8pt Base) ────────────────────────────────────────────────────────
+
+SPACE_1 = 4
+SPACE_2 = 8
+SPACE_3 = 12
+SPACE_4 = 16
+SPACE_6 = 24
+SPACE_8 = 32
 
 # ── Fonts ─────────────────────────────────────────────────────────────────────
 
-F_MONO   = drawing.Font("Courier New", 9.0)
-F_MONO_B = drawing.Font("Courier New", 9.5, drawing.FontStyle.Bold)
-F_SANS   = drawing.Font("Segoe UI",    9.0)
-F_SANS_B = drawing.Font("Segoe UI",    9.0, drawing.FontStyle.Bold)
-F_SANS_S = drawing.Font("Segoe UI",    8.0)
-F_HEAD   = drawing.Font("Segoe UI",    9.0, drawing.FontStyle.Bold)   # section headers
+# Font stacks with dynamic system fallbacks
+FONT_DISPLAY = ["Knile", "Fraunces", "Georgia", "Times New Roman"]
+FONT_HEADING = ["Geomanist", "Manrope", "Segoe UI Semibold", "Segoe UI", "Arial"]
+FONT_BODY    = ["Archia", "Inter", "Segoe UI", "Arial"]
+FONT_MONO    = ["Silka Mono", "JetBrains Mono", "Consolas", "Courier New"]
+
+def _get_font(families, size, style=None):
+    """Try to construct a font using the first available family name in Eto."""
+    try:
+        available = {f.Name.lower() for f in drawing.Fonts.AvailableFontFamilies}
+    except Exception:
+        available = set()
+
+    for family in families:
+        if not available or family.lower() in available:
+            try:
+                if style is not None:
+                    return drawing.Font(family, size, style)
+                else:
+                    return drawing.Font(family, size)
+            except Exception:
+                pass
+    
+    # Direct fallback generation if AvailableFontFamilies isn't accessible or is empty
+    for family in families:
+        try:
+            if style is not None:
+                return drawing.Font(family, size, style)
+            else:
+                return drawing.Font(family, size)
+        except Exception:
+            pass
+            
+    try:
+        if style is not None:
+            return drawing.SystemFonts.Default(size, style)
+        else:
+            return drawing.SystemFonts.Default(size)
+    except Exception:
+        pass
+
+    try:
+        if style == drawing.FontStyle.Bold:
+            return drawing.SystemFonts.Bold()
+        return drawing.SystemFonts.Default()
+    except Exception:
+        return None
+
+F_MONO   = _get_font(FONT_MONO, 9.0)
+F_MONO_B = _get_font(FONT_MONO, 9.5, drawing.FontStyle.Bold)
+F_SANS   = _get_font(FONT_BODY, 9.0)
+F_SANS_B = _get_font(FONT_HEADING, 9.0, drawing.FontStyle.Bold)
+F_SANS_S = _get_font(FONT_BODY, 8.0)
+F_HEAD   = _get_font(FONT_HEADING, 10.0, drawing.FontStyle.Bold)   # section headers (slightly larger)
 
 # ── Builder helpers ───────────────────────────────────────────────────────────
 
