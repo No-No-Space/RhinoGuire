@@ -37,6 +37,7 @@ import scriptcontext as sc
 import Rhino
 import os
 import json
+import webbrowser
 from collections import defaultdict
 
 # ============================================================================
@@ -971,12 +972,14 @@ class DataVisualizationTool(forms.Form):
             except:
                 pass
 
+        self.last_unique_values = {}
+
         self.Title = "Data Visualization Tool (Excel)"
         self.Padding = drawing.Padding(15)
         self.BackgroundColor = _t.BG
         self.Resizable   = True
-        self.MinimumSize = drawing.Size(420, 400)
-        self.ClientSize  = drawing.Size(480, 480)
+        self.MinimumSize = drawing.Size(420, 480)
+        self.ClientSize  = drawing.Size(480, 580)
         self.Topmost = True  # KEEP ON TOP
 
         self.create_controls()
@@ -1040,6 +1043,26 @@ class DataVisualizationTool(forms.Form):
         self.close_button.BackgroundColor = _t.BTN_CLEAR
         self.close_button.Click += self.on_close
 
+        self.color_gen_label = forms.Label()
+        self.color_gen_label.Text = "Color Scheme Generator"
+        self.color_gen_label.Font = _t.F_SANS_B
+
+        self.color_gen_desc = forms.Label()
+        self.color_gen_desc.Text = "AI tool to design RGB palettes. Run Step 2 first — unique values will be copied to clipboard automatically."
+        self.color_gen_desc.TextColor = _t.TEXT_MUTED
+        self.color_gen_desc.Wrap = forms.WrapMode.Word
+
+        self.color_gen_note = forms.Label()
+        self.color_gen_note.Text = "Requires a free Claude account (claude.ai)"
+        self.color_gen_note.Font = _t.F_SANS_S
+        self.color_gen_note.TextColor = _t.TEXT_WARN
+
+        self.color_gen_button = forms.Button()
+        self.color_gen_button.Text = "Open Color Scheme Generator ↗"
+        self.color_gen_button.Font = _t.F_SANS_B
+        self.color_gen_button.BackgroundColor = _t.BTN_DEFAULT
+        self.color_gen_button.Click += self.on_color_gen_clicked
+
     def create_layout(self):
         layout = forms.DynamicLayout()
         layout.Spacing = drawing.Size(8, 8)
@@ -1056,6 +1079,11 @@ class DataVisualizationTool(forms.Form):
         layout.AddRow(self.step3_label)
         layout.AddRow(self.step3_desc)
         layout.AddRow(self.step3_button)
+        layout.AddRow(None)
+        layout.AddRow(self.color_gen_label)
+        layout.AddRow(self.color_gen_desc)
+        layout.AddRow(self.color_gen_note)
+        layout.AddRow(self.color_gen_button)
         layout.AddRow(None)
         layout.AddRow(self.status)
         layout.AddRow(self.close_button)
@@ -1108,6 +1136,7 @@ class DataVisualizationTool(forms.Form):
         if not kvd:
             forms.MessageBox.Show("No metadata found", "Error")
             return
+        self.last_unique_values = kvd
         folder = _prefs_get('chivito_step2', self.excel_folder if os.path.exists(self.excel_folder) else None)
         excel_path = rs.SaveFileName("Save Excel File", "Excel Files (*.xlsx)|*.xlsx||",
                                      folder=folder, filename="UniqueValuesColorSettings.xlsx")
@@ -1138,6 +1167,53 @@ class DataVisualizationTool(forms.Form):
         color_dlg.Owner = Rhino.UI.RhinoEtoApp.MainWindow
         color_dlg.Show()
         self.status.Text = "Step 3: Color Manager opened"
+
+    def on_color_gen_clicked(self, sender, e):
+        clipboard_text = ""
+        clipboard_info = ""
+
+        if self.last_unique_values:
+            rows = ["Key\tValue\tR\tG\tB\tA"]
+            for key in sorted(self.last_unique_values.keys()):
+                for value in self.last_unique_values[key]:
+                    rows.append(f"{key}\t{value}\t-\t-\t-\t-")
+            clipboard_text = "\n".join(rows)
+            total_values = sum(len(v) for v in self.last_unique_values.values())
+            clipboard_info = (
+                f"\n{total_values} values across {len(self.last_unique_values)} keys "
+                "will be copied to the clipboard as TSV — paste them into the tool.\n"
+            )
+        else:
+            clipboard_info = (
+                "\nNo unique values found. Run Step 2 first to scan your "
+                "objects, then use this button to copy them automatically.\n"
+            )
+
+        msg = (
+            "This will open the Color Scheme Generator in your default browser.\n"
+            + clipboard_info +
+            "\nBefore continuing, please note:\n\n"
+            "  • A Claude account is required (free at claude.ai).\n"
+            "  • The tool is hosted on Anthropic's platform as a public artifact.\n"
+            "  • You will be prompted to sign in or create an account if not logged in.\n"
+            "  • The artifact runs entirely in the browser — no installation needed.\n\n"
+            "Open in browser?"
+        )
+        result = forms.MessageBox.Show(
+            msg, "Color Scheme Generator",
+            forms.MessageBoxButtons.YesNo
+        )
+        if result == forms.DialogResult.Yes:
+            if clipboard_text:
+                try:
+                    cb = forms.Clipboard()
+                    cb.Text = clipboard_text
+                    cb.Dispose()
+                except Exception:
+                    pass
+            webbrowser.open(
+                "https://claude.ai/public/artifacts/8e378ee5-7930-4cd3-a8bb-2e96e9563f22"
+            )
 
     def on_close(self, sender, e):
         self.Close()
