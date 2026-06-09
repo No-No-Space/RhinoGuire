@@ -275,6 +275,33 @@ def get_footprint_area(obj_guid):
     return sum(curve_area(c) for c in get_footprint_curves(obj_guid))
 
 
+def get_object_bottom_z(guid):
+    """Return the lowest horizontal face Z for the object, or bbox min Z as fallback."""
+    try:
+        rhobj = sc.doc.Objects.FindId(guid)
+        if rhobj is None:
+            return None
+        geom = rhobj.Geometry
+        brep = None
+        if isinstance(geom, (rg.Extrusion, rg.Surface)):
+            brep = geom.ToBrep()
+        elif isinstance(geom, rg.Brep):
+            brep = geom
+        if brep:
+            zs = []
+            for face in brep.Faces:
+                u = (face.Domain(0).Min + face.Domain(0).Max) * 0.5
+                v = (face.Domain(1).Min + face.Domain(1).Max) * 0.5
+                if abs(face.NormalAt(u, v).Z) > 0.9:
+                    zs.append(face.PointAt(u, v).Z)
+            if zs:
+                return min(zs)
+        bbox = rhobj.Geometry.GetBoundingBox(True)
+        return bbox.Min.Z if bbox.IsValid else None
+    except Exception:
+        return None
+
+
 def combined_area(obj_guids):
     """
     Total footprint area for a list of objects after Boolean Union on their
@@ -330,20 +357,67 @@ def _label(guid, key):
 
 def calc_s1(name_key):
     """
-    Scenario 1 — Selected objects. Footprints merged to remove overlaps.
-    Returns {objects, total, union_ok, skipped}.
+    Scenario 1 — Selected objects. Footprints merged per layer to remove
+    intra-layer overlaps; per-layer totals are then summed.
+    Returns {objects, total, union_ok, skipped, layer_totals, z_warning}.
     """
     guids = rs.SelectedObjects() or []
     per_obj = []
     skipped = 0
+    layer_groups = {}  # {layer_name: [guids]}
+
     for g in guids:
         curves = get_footprint_curves(g)
         if not curves:
             skipped += 1
         area = sum(curve_area(c) for c in curves)
-        per_obj.append({"guid": str(g), "name": _label(g, name_key), "area": area})
-    total, union_ok = combined_area(guids)
-    return {"objects": per_obj, "total": total, "union_ok": union_ok, "skipped": skipped}
+        lname = rs.ObjectLayer(g) or ""
+        layer_groups.setdefault(lname, []).append(g)
+        per_obj.append({"guid": str(g), "name": _label(g, name_key), "area": area, "layer": lname})
+
+    layer_totals = []
+    total = 0.0
+    union_ok = True
+    for lname, lguids in layer_groups.items():
+        area, ok = combined_area(lguids)
+        layer_totals.append({"layer": lname, "area": area})
+        total += area
+        if not ok:
+            union_ok = False
+
+    # Z-warning: detect cross-layer groups that share the same floor elevation,
+    # meaning their footprints may overlap but won't be merged.
+    z_warning = None
+    if len(layer_groups) > 1:
+        z_tol = max(sc.doc.ModelAbsoluteTolerance * 10, 1e-3)
+        layer_z = {}
+        for lname, lguids in layer_groups.items():
+            zs = [z for z in (get_object_bottom_z(g) for g in lguids) if z is not None]
+            if zs:
+                layer_z[lname] = min(zs)
+
+        same_z_pairs = []
+        names = list(layer_z.keys())
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                if abs(layer_z[names[i]] - layer_z[names[j]]) <= z_tol:
+                    same_z_pairs.append((short_name(names[i]), short_name(names[j])))
+
+        if same_z_pairs:
+            pairs_str = ", ".join(f"'{a}' & '{b}'" for a, b in same_z_pairs[:3])
+            z_warning = (
+                f"Same elevation: {pairs_str}. "
+                "Cross-layer overlaps are not merged — use S3 for precise results."
+            )
+
+    return {
+        "objects": per_obj,
+        "total": total,
+        "union_ok": union_ok,
+        "skipped": skipped,
+        "layer_totals": layer_totals,
+        "z_warning": z_warning,
+    }
 
 
 def calc_s2(layer_name, obj_key):
@@ -576,6 +650,9 @@ def format_s1(data, unit):
         return "  No objects selected.\n"
     raw_sum = sum(o["area"] for o in data["objects"])
     union_note = "" if data["union_ok"] else "  [union failed — sum shown]"
+    layer_totals = data.get("layer_totals") or []
+    multi_layer = len(layer_totals) > 1
+    total_label = "TOTAL (per-layer merged)" if multi_layer else "TOTAL (footprint, overlaps merged)"
     lines = [
         _rule(),
         f"  SCENARIO 1 — SELECTED OBJECTS   [{unit}]",
@@ -585,18 +662,27 @@ def format_s1(data, unit):
     ]
     for o in data["objects"]:
         lines.append(_row(o["name"][:36], _fmt(o["area"])))
-    overlap = raw_sum - data["total"]
     lines += [
         _rule("─"),
         _row("Sum (individual totals)", _fmt(raw_sum)),
-        _row(f"TOTAL (footprint, overlaps merged){union_note}", _fmt(data["total"])),
     ]
-    if overlap > 1e-6:
+    if multi_layer:
+        for lt in layer_totals:
+            lines.append(_row(f"  {short_name(lt['layer'])}", _fmt(lt["area"])))
+    overlap = raw_sum - data["total"]
+    lines.append(_row(f"{total_label}{union_note}", _fmt(data["total"])))
+    if overlap > 1e-6 and not multi_layer:
         lines += [
             _rule("─"),
             _row("  [!] Overlapping area (sum - total)", _fmt(overlap)),
             "      Some objects share footprint area.",
             "      Verify whether double-counting is intentional.",
+        ]
+    z_warning = data.get("z_warning")
+    if z_warning:
+        lines += [
+            _rule("─"),
+            f"  [!] {z_warning}",
         ]
     if data.get("skipped", 0) > 0:
         lines += [
@@ -2026,6 +2112,8 @@ class LinderoForm(forms.Form):
         elif rt == 10:
             e.BackgroundColor = _t.BTN_DEFAULT
             e.Font = _t.F_MONO_B
+        elif rt == 15:
+            e.BackgroundColor = _t.BTN_DEFAULT
         elif rt == 20:
             e.BackgroundColor = _t.BTN_DEFAULT
         elif rt == 30:
@@ -2092,6 +2180,7 @@ class LinderoForm(forms.Form):
         """
         Shared populator for S1 and S2: flat object list + sum + total + warnings.
         data must have: objects [{name, area}], total, union_ok, skipped.
+        S1 may also carry: layer_totals [{layer, area}], z_warning (str or None).
         """
         collection = forms.TreeGridItemCollection()
         raw_sum = sum(o["area"] for o in data["objects"])
@@ -2102,14 +2191,30 @@ class LinderoForm(forms.Form):
         sum_item = forms.TreeGridItem()
         sum_item.Values = ["Sum (individual totals)", _fmt(raw_sum).rjust(10), 20]
         collection.Add(sum_item)
+
+        layer_totals = data.get("layer_totals") or []
+        multi_layer = len(layer_totals) > 1
+        if multi_layer:
+            for lt in layer_totals:
+                lt_item = forms.TreeGridItem()
+                lt_item.Values = [f"  {short_name(lt['layer'])}", _fmt(lt["area"]).rjust(10), 15]
+                collection.Add(lt_item)
+
         union_note = "  [union failed — sum shown]" if not data["union_ok"] else ""
+        total_label = "TOTAL (per-layer merged)" if multi_layer else "TOTAL (overlaps merged)"
         total_item = forms.TreeGridItem()
-        total_item.Values = [f"TOTAL (overlaps merged){union_note}", _fmt(data["total"]).rjust(10), 30]
+        total_item.Values = [f"{total_label}{union_note}", _fmt(data["total"]).rjust(10), 30]
         collection.Add(total_item)
+
         overlap = raw_sum - data["total"]
-        if overlap > 1e-6:
+        if overlap > 1e-6 and not multi_layer:
             w = forms.TreeGridItem()
             w.Values = [f"  Overlap: {_fmt(overlap)} — some objects share footprint area", "", 40]
+            collection.Add(w)
+        z_warning = data.get("z_warning")
+        if z_warning:
+            w = forms.TreeGridItem()
+            w.Values = [f"  [!] {z_warning}", "", 40]
             collection.Add(w)
         if data.get("skipped", 0) > 0:
             w = forms.TreeGridItem()
