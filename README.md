@@ -39,11 +39,21 @@ Accepted destination types: Mesh, SubD, Surface, Polysurface, Solid. Includes an
 
 Typical use case: road or path meshes that need to follow the contours of a terrain mesh or landscape surface.
 
+### [TerrainTools](TerrainTools/) — Terrain Grading Suite
+
+A suite of three tools sharing one grading engine (`_core`) for **modifying terrains** modelled as Surfaces or Meshes. The terrain is sampled with the same Z-projection technique as Sebucan; grading is computed analytically on a regular heightfield (cut/fill slopes auto-stop at the daylight line). All outputs are new meshes — the original terrain is never modified.
+
+- **PadGrader** — place one or more building pads (closed boundaries at a target elevation) and grade cut/fill slopes around them to daylight. Outputs a graded mesh + cut/fill totals.
+- **WayGrader** — grade a way/path corridor from its centerline in a persistent window: width, crossfall (crown/single), cut/fill slopes; Regenerate without re-picking. Outputs a graded corridor mesh + per-station mass-haul.
+- **CutFillReport** — compare original vs modified terrain (or read the last grading), compute cut & fill volumes, show KPIs/charts, tint a cut/fill map mesh with a legend, and export to **Excel** and **PNG**.
+
+Slopes accept H:V ratio, percent, or degrees. See [`TerrainTools/`](TerrainTools/) for the design docs (`README.md`, `PLAN.md`, `DECISIONS.md`).
+
 ## Requirements
 
 - **Rhino 8** with CPython 3
-- **openpyxl** — required by Arriero and Chivito (installed automatically via `# r: openpyxl` header)
-- Baquiano, Lindero and Sebucan have no external dependencies
+- **openpyxl** — required by Arriero, Chivito and CutFillReport (installed automatically via `# r: openpyxl` header)
+- Baquiano, Lindero, Sebucan, PadGrader and WayGrader have no external dependencies
 
 ## Quick Start
 
@@ -80,9 +90,31 @@ RhinoGuire/
 │   └── WrapeMeshOnMesh/
 │       ├── Sebucan.py
 │       └── README.md
-└── SearchData/
-    ├── Baquiano.py
-    └── README.md
+├── SearchData/
+│   ├── Baquiano.py
+│   └── README.md
+└── TerrainTools/
+    ├── README.md            # suite overview
+    ├── PLAN.md              # implementation plan
+    ├── DECISIONS.md         # decision log
+    ├── _core/               # shared grading engine (grading_core)
+    │   ├── slope.py
+    │   ├── terrain.py
+    │   ├── grading.py
+    │   ├── volumes.py
+    │   ├── meshbuild.py
+    │   ├── report.py
+    │   └── tests/test_headless.py
+    ├── _widgets.py          # shared Eto widgets + doc helpers
+    ├── PadGrader/
+    │   ├── PadGrader.py
+    │   └── README.md
+    ├── WayGrader/
+    │   ├── WayGrader.py
+    │   └── README.md
+    └── CutFillReport/
+        ├── CutFillReport.py
+        └── README.md
 ```
 
 ## License

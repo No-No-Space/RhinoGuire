@@ -4,7 +4,7 @@ author: Aksel Alvarez 2026
 description: >
   RhinoGuire - A collection of Python scripts for Rhino 8.
   Tools for area measurement, data export/import, data visualization,
-  mesh tools, and object search.
+  mesh tools, object search, and terrain grading (cut/fill earthwork).
 url: https://github.com/No-No-Space/RhinoGuire
 keywords:
   - rhinoguire
@@ -12,4 +12,8 @@ keywords:
   - bim
   - data
   - mesh
+  - terrain
+  - grading
+  - cut-fill
+  - earthwork
 rhino: ">=8.0"

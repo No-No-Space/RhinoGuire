@@ -24,6 +24,9 @@ SCRIPTS = {
     "RG_Chivito":   os.path.join(RHINOGUIRE_ROOT, "DataVisualization",   "Chivito.py"),
     "RG_Sebucan":   os.path.join(RHINOGUIRE_ROOT, "MeshTools",           "WrapeMeshOnMesh", "Sebucan.py"),
     "RG_Baquiano":  os.path.join(RHINOGUIRE_ROOT, "SearchData",          "Baquiano.py"),
+    "RG_PadGrader":     os.path.join(RHINOGUIRE_ROOT, "TerrainTools", "PadGrader",     "PadGrader.py"),
+    "RG_WayGrader":     os.path.join(RHINOGUIRE_ROOT, "TerrainTools", "WayGrader",     "WayGrader.py"),
+    "RG_CutFillReport": os.path.join(RHINOGUIRE_ROOT, "TerrainTools", "CutFillReport", "CutFillReport.py"),
 }
 
 # Verify all scripts exist

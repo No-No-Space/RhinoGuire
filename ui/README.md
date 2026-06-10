@@ -27,13 +27,27 @@ Right-click on the toolbar > `New Button` for each tool.
 
 **Available buttons:**
 
-| Label    | Script Key   | Description            |
-|----------|--------------|------------------------|
-| Lindero  | RG_Lindero   | Area Measurer          |
-| Arriero  | RG_Arriero   | Data Exporter/Importer |
-| Chivito  | RG_Chivito   | Data Visualization     |
-| Sebucan  | RG_Sebucan   | Wrap Mesh on Mesh      |
-| Baquiano | RG_Baquiano  | Search Data            |
+| Label         | Script Key        | Description                 |
+|---------------|-------------------|-----------------------------|
+| Lindero       | RG_Lindero        | Area Measurer               |
+| Arriero       | RG_Arriero        | Data Exporter/Importer      |
+| Chivito       | RG_Chivito        | Data Visualization          |
+| Sebucan       | RG_Sebucan        | Wrap Mesh on Mesh           |
+| Baquiano      | RG_Baquiano       | Search Data                 |
+| PadGrader     | RG_PadGrader      | TerrainTools — building pad grading   |
+| WayGrader     | RG_WayGrader      | TerrainTools — way/path corridor grading |
+| CutFillReport | RG_CutFillReport  | TerrainTools — cut/fill compare & export |
+
+> **TerrainTools buttons.** The three TerrainTools above can also be launched
+> with the dedicated root shims (mirrors the other tools), which avoids passing
+> a script key:
+> ```
+> ! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_padgrader.py"
+> ! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_waygrader.py"
+> ! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_cutfillreport.py"
+> ```
+> CutFillReport needs `openpyxl` for Excel export — Rhino installs it
+> automatically from the `# r: openpyxl` header on first run.
 
 ### 4. Save the toolbar
 `File > Save As` → save as `RhinoGuire/ui/RhinoGuire.rui`

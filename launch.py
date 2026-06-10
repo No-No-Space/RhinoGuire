@@ -17,6 +17,9 @@ SCRIPTS = {
     "Chivito":  os.path.join(_ROOT, "DataVisualization",   "Chivito.py"),
     "Sebucan":  os.path.join(_ROOT, "MeshTools",           "WrapeMeshOnMesh", "Sebucan.py"),
     "Baquiano": os.path.join(_ROOT, "SearchData",          "Baquiano.py"),
+    "PadGrader":     os.path.join(_ROOT, "TerrainTools", "PadGrader",     "PadGrader.py"),
+    "WayGrader":     os.path.join(_ROOT, "TerrainTools", "WayGrader",     "WayGrader.py"),
+    "CutFillReport": os.path.join(_ROOT, "TerrainTools", "CutFillReport", "CutFillReport.py"),
 }
 
 def launch(key):
