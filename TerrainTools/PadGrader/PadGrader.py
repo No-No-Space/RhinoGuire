@@ -171,7 +171,10 @@ class PadGraderForm(forms.Form):
         L.AddRow(close_btn)
 
         scroll = forms.Scrollable()
-        scroll.Border = getattr(forms.BorderType, "None")
+        try:
+            scroll.Border = getattr(forms.BorderType, "None")
+        except AttributeError:
+            pass
         scroll.Content = L
         self.Content = scroll
 
