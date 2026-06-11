@@ -65,58 +65,6 @@ Each tool opens its own GUI window. See the individual README files for detailed
 
 Alternatively, load the toolbar bundle (`ui/RhinoGuire.rui`) for one-click access from the Rhino interface — see [`ui/README.md`](ui/README.md) for setup instructions.
 
-## Repository Structure
-
-```text
-RhinoGuire/
-├── README.md
-├── LICENSE
-├── install.py
-├── launch.py
-├── manifest.yml
-├── ui/
-│   └── README.md
-├── AreaMeasurer/
-│   ├── Lindero.py
-│   └── README.md
-├── DataExporterImporter/
-│   ├── Arriero.py
-│   └── README.md
-├── DataVisualization/
-│   ├── Chivito.py
-│   ├── README.md
-│   └── _ExcelOutput/
-├── MeshTools/
-│   └── WrapeMeshOnMesh/
-│       ├── Sebucan.py
-│       └── README.md
-├── SearchData/
-│   ├── Baquiano.py
-│   └── README.md
-└── TerrainTools/
-    ├── README.md            # suite overview
-    ├── PLAN.md              # implementation plan
-    ├── DECISIONS.md         # decision log
-    ├── _core/               # shared grading engine (grading_core)
-    │   ├── slope.py
-    │   ├── terrain.py
-    │   ├── grading.py
-    │   ├── volumes.py
-    │   ├── meshbuild.py
-    │   ├── report.py
-    │   └── tests/test_headless.py
-    ├── _widgets.py          # shared Eto widgets + doc helpers
-    ├── PadGrader/
-    │   ├── PadGrader.py
-    │   └── README.md
-    ├── WayGrader/
-    │   ├── WayGrader.py
-    │   └── README.md
-    └── CutFillReport/
-        ├── CutFillReport.py
-        └── README.md
-```
-
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.

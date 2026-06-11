@@ -1,11 +1,5 @@
 # Lindero — Footprint Area Calculator
 
-**Version:** 0.5
-**Author:** Aquelon
-**Requires:** Rhino 8, CPython 3 engine (`#! python3`), `openpyxl` (auto-installed)
-
----
-
 ## What it does
 
 Lindero calculates the **footprint area** of Rhino objects — the plan area as seen from directly above (XY projection). This is distinct from the surface area that Rhino's built-in `Area` command computes, which sums all faces of an object.
