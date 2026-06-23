@@ -96,6 +96,75 @@ def tint_by_delta(mesh, grade, ramp, scale=None):
     return scale
 
 
+def _interp_grid_z(grid_2d, grade, x, y):
+    """Bilinear interpolation over a grade grid's 2-D Z array at world position (x, y)."""
+    fi = (x - grade.x0) / grade.cell
+    fj = (y - grade.y0) / grade.cell
+    i0 = int(fi)
+    j0 = int(fj)
+    if i0 < 0 or j0 < 0 or i0 >= grade.nx or j0 >= grade.ny:
+        return None
+    i1 = min(i0 + 1, grade.nx - 1)
+    j1 = min(j0 + 1, grade.ny - 1)
+    tx = fi - i0
+    ty = fj - j0
+    z00 = grid_2d[j0][i0]
+    z10 = grid_2d[j0][i1]
+    z01 = grid_2d[j1][i0]
+    z11 = grid_2d[j1][i1]
+    vals = [z for z in (z00, z10, z01, z11) if z is not None]
+    if not vals:
+        return None
+    if len(vals) < 4:
+        return sum(vals) / len(vals)
+    return (z00 * (1 - tx) * (1 - ty) +
+            z10 * tx       * (1 - ty) +
+            z01 * (1 - tx) * ty +
+            z11 * tx       * ty)
+
+
+def deform_terrain_to_grade(terrain_mesh, grade):
+    """Return a copy of terrain_mesh with the design *delta* applied to vertices inside
+    the analysis zone.
+
+    Uses (z_design - z_terrain) as the displacement so that vertices outside the active
+    grading zone receive a delta of exactly zero — the mesh is not distorted there and
+    the seam at the analysis-zone boundary is seamless.
+    """
+    x_lo = grade.x0
+    x_hi = grade.x0 + (grade.nx - 1) * grade.cell
+    y_lo = grade.y0
+    y_hi = grade.y0 + (grade.ny - 1) * grade.cell
+
+    out = rg.Mesh()
+    for vi in range(terrain_mesh.Vertices.Count):
+        v = terrain_mesh.Vertices[vi]
+        x, y, z_v = float(v.X), float(v.Y), float(v.Z)
+        if x_lo <= x <= x_hi and y_lo <= y <= y_hi:
+            z_d = _interp_grid_z(grade.z_design,  grade, x, y)
+            z_t = _interp_grid_z(grade.z_terrain, grade, x, y)
+            if z_d is not None and z_t is not None and abs(z_d - z_t) > 0.001:
+                # Active grading zone: place vertex exactly at design elevation.
+                # Using z_d directly (not z_v + delta) avoids grid-interpolation
+                # error that grows with cell size, keeping pads flat and slopes correct.
+                out.Vertices.Add(x, y, z_d)
+            else:
+                out.Vertices.Add(x, y, z_v)
+        else:
+            out.Vertices.Add(x, y, z_v)
+
+    for fi in range(terrain_mesh.Faces.Count):
+        f = terrain_mesh.Faces[fi]
+        if f.IsQuad:
+            out.Faces.AddFace(f.A, f.B, f.C, f.D)
+        else:
+            out.Faces.AddFace(f.A, f.B, f.C)
+
+    out.Normals.ComputeNormals()
+    out.Compact()
+    return out
+
+
 def default_ramp(t):
     """Blue (cut) -> light neutral (0) -> red (fill). t in [-1, 1]."""
     cut  = (42, 139, 156)    # Mar Caribe teal-blue

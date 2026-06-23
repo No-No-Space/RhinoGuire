@@ -82,34 +82,44 @@ class PadGraderForm(forms.Form):
 
     # ------------------------------------------------------------------
     def _build_ui(self):
-        L = forms.DynamicLayout()
-        L.DefaultSpacing = drawing.Size(5, 5)
+        L = forms.StackLayout()
+        L.Orientation = forms.Orientation.Vertical
+        L.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        L.Spacing = 5
 
-        L.AddRow(_t.lbl("Building Pad Grading", _t.F_HEAD, _t.TEXT))
-        L.AddRow(_t.hint("Cut/fill a terrain around level pads, down to daylight."))
-        L.AddRow(None)
+        def _add(ctrl):
+            L.Items.Add(forms.StackLayoutItem(ctrl))
+
+        def _gap():
+            sp = forms.Panel()
+            sp.Height = 6
+            _add(sp)
+
+        _add(_t.lbl("Building Pad Grading", _t.F_HEAD, _t.TEXT))
+        _add(_t.hint("Cut/fill a terrain around level pads, down to daylight."))
+        _gap()
 
         # 1 — Terrain
-        L.AddRow(_t.lbl("1 — Terrain  (mesh, surface, polysurface…)", _t.F_SANS_B, _t.TEXT))
+        _add(_t.lbl("1 — Terrain  (mesh, surface, polysurface…)", _t.F_SANS_B, _t.TEXT))
         self.terrain_btn = _t.btn("Select Terrain")
         self.terrain_btn.Click += self.on_select_terrain
-        L.AddRow(self.terrain_btn)
+        _add(self.terrain_btn)
         self.terrain_info = _t.lbl("No terrain selected.", _t.F_SANS, _t.TEXT_MUTED)
-        L.AddRow(self.terrain_info)
-        L.AddRow(None)
+        _add(self.terrain_info)
+        _gap()
 
         # 2 — Pad boundaries
-        L.AddRow(_t.lbl("2 — Pad boundary(ies)  (closed planar curves)", _t.F_SANS_B, _t.TEXT))
+        _add(_t.lbl("2 — Pad boundary(ies)  (closed planar curves)", _t.F_SANS_B, _t.TEXT))
         self.pad_btn = _t.btn("Select Pad Curve(s)")
         self.pad_btn.Enabled = False
         self.pad_btn.Click += self.on_select_pads
-        L.AddRow(self.pad_btn)
+        _add(self.pad_btn)
         self.pad_info = _t.lbl("No pad curves selected.", _t.F_SANS, _t.TEXT_MUTED)
-        L.AddRow(self.pad_info)
-        L.AddRow(None)
+        _add(self.pad_info)
+        _gap()
 
         # 3 — Pad elevation
-        L.AddRow(_t.lbl("3 — Pad elevation", _t.F_SANS_B, _t.TEXT))
+        _add(_t.lbl("3 — Pad elevation", _t.F_SANS_B, _t.TEXT))
         self.elev_mode = forms.DropDown()
         for text, _key in _PAD_Z_MODES:
             self.elev_mode.Items.Add(text)
@@ -119,20 +129,20 @@ class PadGraderForm(forms.Form):
         self.elev_z.Text = "0.0"
         self.elev_z.Width = 70
         self.elev_z.Enabled = False
-        L.AddRow(_w.labeled_row("Mode:", self.elev_mode, 70))
-        L.AddRow(_w.labeled_row("Explicit Z:", self.elev_z, 70))
-        L.AddRow(None)
+        _add(_w.labeled_row("Mode:", self.elev_mode, 70))
+        _add(_w.labeled_row("Explicit Z:", self.elev_z, 70))
+        _gap()
 
         # 4 — Grading slopes
-        L.AddRow(_t.lbl("4 — Grading slopes  (H:V is run:rise, e.g. 2:1)", _t.F_SANS_B, _t.TEXT))
+        _add(_t.lbl("4 — Grading slopes  (H:V is run:rise, e.g. 2:1)", _t.F_SANS_B, _t.TEXT))
         self.cut_slope = _w.SlopeInput("Cut:", "2", "ratio_hv")
         self.fill_slope = _w.SlopeInput("Fill:", "2", "ratio_hv")
-        L.AddRow(self.cut_slope.control)
-        L.AddRow(self.fill_slope.control)
-        L.AddRow(None)
+        _add(self.cut_slope.control)
+        _add(self.fill_slope.control)
+        _gap()
 
         # Options
-        L.AddRow(_t.lbl("Options", _t.F_SANS_B, _t.TEXT))
+        _add(_t.lbl("Options", _t.F_SANS_B, _t.TEXT))
         self.cell_box = forms.TextBox()
         self.cell_box.Text = "1.0"
         self.cell_box.Width = 70
@@ -142,33 +152,31 @@ class PadGraderForm(forms.Form):
         self.layer_box = forms.TextBox()
         self.layer_box.Text = "TerrainTools::Graded"
         self.layer_box.Width = 180
-        L.AddRow(_w.labeled_row("Cell size:", self.cell_box, 90))
-        L.AddRow(_w.labeled_row("Max reach:", self.reach_box, 90))
-        L.AddRow(_w.labeled_row("Output layer:", self.layer_box, 90))
-        L.AddRow(None)
+        _add(_w.labeled_row("Cell size:", self.cell_box, 90))
+        _add(_w.labeled_row("Max reach:", self.reach_box, 90))
+        _add(_w.labeled_row("Output layer:", self.layer_box, 90))
+        _gap()
 
-        # Generate / Close
         self.gen_btn = _t.btn("Generate", _t.BTN_CALC)
         self.gen_btn.Enabled = False
         self.gen_btn.Click += self.on_generate
-        L.AddRow(self.gen_btn)
+        _add(self.gen_btn)
 
-        # Results panel
         self.results_lbl = _t.lbl("", _t.F_SANS, _t.TEXT)
-        L.AddRow(self.results_lbl)
+        _add(self.results_lbl)
 
         self.report_btn = _t.btn("Open in CutFillReport")
         self.report_btn.Enabled = False
         self.report_btn.Click += self.on_open_report
-        L.AddRow(self.report_btn)
+        _add(self.report_btn)
 
-        L.AddRow(None)
+        _gap()
         self.status_lbl = _t.lbl("Ready — select a terrain to begin.", _t.F_SANS, _t.TEXT_MUTED)
-        L.AddRow(self.status_lbl)
+        _add(self.status_lbl)
 
         close_btn = _t.btn("Close", _t.BTN_CLEAR)
         close_btn.Click += lambda s, e: self.Close()
-        L.AddRow(close_btn)
+        _add(close_btn)
 
         scroll = forms.Scrollable()
         try:
@@ -288,11 +296,12 @@ class PadGraderForm(forms.Form):
         try:
             grade = _grading.grade_pads(self.terrain, curves, pad_mode,
                                         m_cut, m_fill, cell, reach)
-            mesh = _meshbuild.grid_to_mesh(grade, only_region=True)
-            if mesh.Vertices.Count == 0:
+            _check = _meshbuild.grid_to_mesh(grade, only_region=True)
+            if _check.Vertices.Count == 0:
                 self._status("Grading produced no mesh — check slopes / reach / elevation.", "warn")
                 self.gen_btn.Enabled = True
                 return
+            mesh = _meshbuild.deform_terrain_to_grade(self.terrain.mesh, grade)
             layer = self.layer_box.Text.strip() or "TerrainTools::Graded"
             mesh_id = _w.add_mesh_to_layer(mesh, layer, name="PadGraded")
             sc.doc.Views.Redraw()

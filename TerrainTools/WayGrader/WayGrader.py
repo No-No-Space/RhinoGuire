@@ -78,90 +78,99 @@ class WayGraderForm(forms.Form):
 
     # ------------------------------------------------------------------
     def _build_ui(self):
-        L = forms.DynamicLayout()
-        L.DefaultSpacing = drawing.Size(5, 5)
+        L = forms.StackLayout()
+        L.Orientation = forms.Orientation.Vertical
+        L.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        L.Spacing = 5
 
-        L.AddRow(_t.lbl("Way / Path Corridor Grading", _t.F_HEAD, _t.TEXT))
-        L.AddRow(_t.hint("Drape a corridor on the terrain, grade skirts to daylight."))
-        L.AddRow(None)
+        def _add(ctrl):
+            L.Items.Add(forms.StackLayoutItem(ctrl))
+
+        def _gap():
+            sp = forms.Panel()
+            sp.Height = 6
+            _add(sp)
+
+        _add(_t.lbl("Way / Path Corridor Grading", _t.F_HEAD, _t.TEXT))
+        _add(_t.hint("Drape a corridor on the terrain, grade skirts to daylight."))
+        _gap()
 
         # 1 — Terrain
-        L.AddRow(_t.lbl("1 — Terrain", _t.F_SANS_B, _t.TEXT))
+        _add(_t.lbl("1 — Terrain", _t.F_SANS_B, _t.TEXT))
         self.terrain_btn = _t.btn("Select Terrain")
         self.terrain_btn.Click += self.on_select_terrain
-        L.AddRow(self.terrain_btn)
+        _add(self.terrain_btn)
         self.terrain_info = _t.lbl("No terrain selected.", _t.F_SANS, _t.TEXT_MUTED)
-        L.AddRow(self.terrain_info)
-        L.AddRow(None)
+        _add(self.terrain_info)
+        _gap()
 
         # 2 — Centerline
-        L.AddRow(_t.lbl("2 — Centerline  (polyline / curve)", _t.F_SANS_B, _t.TEXT))
+        _add(_t.lbl("2 — Centerline  (polyline / curve)", _t.F_SANS_B, _t.TEXT))
         self.center_btn = _t.btn("Pick / Re-pick Centerline")
         self.center_btn.Enabled = False
         self.center_btn.Click += self.on_select_center
-        L.AddRow(self.center_btn)
+        _add(self.center_btn)
         self.center_info = _t.lbl("No centerline selected.", _t.F_SANS, _t.TEXT_MUTED)
-        L.AddRow(self.center_info)
-        L.AddRow(None)
+        _add(self.center_info)
+        _gap()
 
         # Parameters
-        L.AddRow(_t.lbl("Corridor parameters", _t.F_SANS_B, _t.TEXT))
+        _add(_t.lbl("Corridor parameters", _t.F_SANS_B, _t.TEXT))
         self.width_box = forms.TextBox()
         self.width_box.Text = "4.0"
         self.width_box.Width = 70
-        L.AddRow(_w.labeled_row("Width:", self.width_box, 95))
+        _add(_w.labeled_row("Width:", self.width_box, 95))
 
         self.crossfall_mode = forms.DropDown()
         for text, _k in _CROSSFALL_MODES:
             self.crossfall_mode.Items.Add(text)
         self.crossfall_mode.SelectedIndex = 0
-        L.AddRow(_w.labeled_row("Crossfall:", self.crossfall_mode, 95))
+        _add(_w.labeled_row("Crossfall:", self.crossfall_mode, 95))
         self.cross_slope = _w.SlopeInput("Cross slope:", "2", "percent", width_label=95)
-        L.AddRow(self.cross_slope.control)
+        _add(self.cross_slope.control)
 
         self.cut_slope = _w.SlopeInput("Cut:", "2", "ratio_hv", width_label=95)
         self.fill_slope = _w.SlopeInput("Fill:", "2", "ratio_hv", width_label=95)
-        L.AddRow(self.cut_slope.control)
-        L.AddRow(self.fill_slope.control)
-        L.AddRow(None)
+        _add(self.cut_slope.control)
+        _add(self.fill_slope.control)
+        _gap()
 
         # Options
-        L.AddRow(_t.lbl("Options", _t.F_SANS_B, _t.TEXT))
+        _add(_t.lbl("Options", _t.F_SANS_B, _t.TEXT))
         self.station_box = forms.TextBox(); self.station_box.Text = "2.0"; self.station_box.Width = 70
         self.cell_box = forms.TextBox(); self.cell_box.Text = "1.0"; self.cell_box.Width = 70
         self.reach_box = forms.TextBox(); self.reach_box.Text = "30"; self.reach_box.Width = 70
         self.layer_box = forms.TextBox(); self.layer_box.Text = "TerrainTools::Graded"; self.layer_box.Width = 180
-        L.AddRow(_w.labeled_row("Station spacing:", self.station_box, 110))
-        L.AddRow(_w.labeled_row("Cell / cross step:", self.cell_box, 110))
-        L.AddRow(_w.labeled_row("Max reach:", self.reach_box, 110))
-        L.AddRow(_w.labeled_row("Output layer:", self.layer_box, 110))
+        _add(_w.labeled_row("Station spacing:", self.station_box, 110))
+        _add(_w.labeled_row("Cell / cross step:", self.cell_box, 110))
+        _add(_w.labeled_row("Max reach:", self.reach_box, 110))
+        _add(_w.labeled_row("Output layer:", self.layer_box, 110))
         self.replace_check = forms.CheckBox()
         self.replace_check.Text = "Replace previous result on Regenerate"
         self.replace_check.Checked = True
-        L.AddRow(self.replace_check)
-        L.AddRow(None)
+        _add(self.replace_check)
+        _gap()
 
-        # Generate
         self.gen_btn = _t.btn("Generate", _t.BTN_CALC)
         self.gen_btn.Enabled = False
         self.gen_btn.Click += self.on_generate
-        L.AddRow(self.gen_btn)
+        _add(self.gen_btn)
 
         self.results_lbl = _t.lbl("", _t.F_SANS, _t.TEXT)
-        L.AddRow(self.results_lbl)
+        _add(self.results_lbl)
 
         self.report_btn = _t.btn("Open in CutFillReport")
         self.report_btn.Enabled = False
         self.report_btn.Click += self.on_open_report
-        L.AddRow(self.report_btn)
+        _add(self.report_btn)
 
-        L.AddRow(None)
+        _gap()
         self.status_lbl = _t.lbl("Ready — select a terrain to begin.", _t.F_SANS, _t.TEXT_MUTED)
-        L.AddRow(self.status_lbl)
+        _add(self.status_lbl)
 
         close_btn = _t.btn("Close", _t.BTN_CLEAR)
         close_btn.Click += lambda s, e: self.Close()
-        L.AddRow(close_btn)
+        _add(close_btn)
 
         scroll = forms.Scrollable()
         try:
@@ -258,11 +267,12 @@ class WayGraderForm(forms.Form):
         centerline = rs.coercecurve(self.center_id)
         try:
             grade = _grading.grade_corridor(self.terrain, centerline, params)
-            mesh = _meshbuild.grid_to_mesh(grade, only_region=True)
-            if mesh.Vertices.Count == 0:
+            _check = _meshbuild.grid_to_mesh(grade, only_region=True)
+            if _check.Vertices.Count == 0:
                 self._status("Corridor produced no mesh — check width / reach / slopes.", "warn")
                 self.gen_btn.Enabled = True
                 return
+            mesh = _meshbuild.deform_terrain_to_grade(self.terrain.mesh, grade)
             if self.replace_check.Checked and self.last_mesh_id:
                 rs.DeleteObject(self.last_mesh_id)
                 self.last_mesh_id = None

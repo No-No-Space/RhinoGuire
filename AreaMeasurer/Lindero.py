@@ -302,6 +302,21 @@ def get_object_bottom_z(guid):
         return None
 
 
+def _group_by_z(guids, z_tol):
+    """Split guids into elevation bands using z_tol. Returns list of guid lists."""
+    pairs = sorted(
+        ((get_object_bottom_z(g) or 0.0, g) for g in guids),
+        key=lambda p: p[0]
+    )
+    groups = []  # [band_min_z, [guids]]
+    for z, g in pairs:
+        if not groups or z - groups[-1][0] > z_tol:
+            groups.append([z, [g]])
+        else:
+            groups[-1][1].append(g)
+    return [band[1] for band in groups]
+
+
 def combined_area(obj_guids):
     """
     Total footprint area for a list of objects after Boolean Union on their
@@ -355,7 +370,7 @@ def _label(guid, key):
     return name if name else str(guid)[:8] + "…"
 
 
-def calc_s1(name_key):
+def calc_s1(name_key, z_height_tol=0.5):
     """
     Scenario 1 — Selected objects. Footprints merged per layer to remove
     intra-layer overlaps; per-layer totals are then summed.
@@ -379,17 +394,20 @@ def calc_s1(name_key):
     total = 0.0
     union_ok = True
     for lname, lguids in layer_groups.items():
-        area, ok = combined_area(lguids)
-        layer_totals.append({"layer": lname, "area": area})
-        total += area
-        if not ok:
-            union_ok = False
+        z_bands = _group_by_z(lguids, z_height_tol)
+        layer_area = 0.0
+        for band_guids in z_bands:
+            area, ok = combined_area(band_guids)
+            layer_area += area
+            if not ok:
+                union_ok = False
+        layer_totals.append({"layer": lname, "area": layer_area})
+        total += layer_area
 
     # Z-warning: detect cross-layer groups that share the same floor elevation,
     # meaning their footprints may overlap but won't be merged.
     z_warning = None
     if len(layer_groups) > 1:
-        z_tol = max(sc.doc.ModelAbsoluteTolerance * 10, 1e-3)
         layer_z = {}
         for lname, lguids in layer_groups.items():
             zs = [z for z in (get_object_bottom_z(g) for g in lguids) if z is not None]
@@ -400,7 +418,7 @@ def calc_s1(name_key):
         names = list(layer_z.keys())
         for i in range(len(names)):
             for j in range(i + 1, len(names)):
-                if abs(layer_z[names[i]] - layer_z[names[j]]) <= z_tol:
+                if abs(layer_z[names[i]] - layer_z[names[j]]) <= z_height_tol:
                     same_z_pairs.append((short_name(names[i]), short_name(names[j])))
 
         if same_z_pairs:
@@ -420,7 +438,7 @@ def calc_s1(name_key):
     }
 
 
-def calc_s2(layer_name, obj_key):
+def calc_s2(layer_name, obj_key, z_height_tol=0.5):
     """
     Scenario 2 — All objects on one layer, footprints merged.
     Returns {objects, total, union_ok, skipped}.
@@ -435,7 +453,14 @@ def calc_s2(layer_name, obj_key):
             skipped += 1
         area = sum(curve_area(c) for c in curves)
         per_obj.append({"guid": str(g), "name": _label(g, obj_key), "area": area})
-    total, union_ok = combined_area(guids)
+    z_bands = _group_by_z(guids, z_height_tol)
+    total = 0.0
+    union_ok = True
+    for band_guids in z_bands:
+        area, ok = combined_area(band_guids)
+        total += area
+        if not ok:
+            union_ok = False
     return {"objects": per_obj, "total": total, "union_ok": union_ok, "skipped": skipped}
 
 
@@ -539,6 +564,58 @@ def calc_s4(parent_layer, key_sequence):
         warnings.append("[!] No objects found in any sublayer.")
 
     return {"tree": tree, "overall_total": overall_total, "warnings": warnings}
+
+
+def calc_s5(parent_layer, obj_key, z_height_tol):
+    """
+    Scenario 5 — Group Hierarchy.
+    Each sublayer is a group; objects at different heights within the group are
+    split into Z-elevation bands (z_height_tol), unioned per band, then summed.
+    Returns {sublayers: {name: {objects, z_totals, total, union_ok, skipped}}, overall_total}.
+    """
+    result = {"sublayers": {}, "overall_total": 0.0}
+    for sl in get_child_layers(parent_layer):
+        guids = get_layer_objects(sl)
+        if not guids:
+            result["sublayers"][sl] = {
+                "objects": [], "z_totals": [], "total": 0.0, "union_ok": True, "skipped": 0
+            }
+            continue
+
+        objects = []
+        skipped = 0
+        for guid in guids:
+            curves = get_footprint_curves(guid)
+            if not curves:
+                skipped += 1
+            objects.append({
+                "guid": str(guid),
+                "name": _label(guid, obj_key),
+                "area": sum(curve_area(c) for c in curves),
+            })
+
+        z_bands = _group_by_z(guids, z_height_tol)
+        total = 0.0
+        union_ok = True
+        z_totals = []
+        for band_guids in z_bands:
+            band_z = get_object_bottom_z(band_guids[0])
+            area, ok = combined_area(band_guids)
+            z_totals.append({"z": band_z if band_z is not None else 0.0, "area": area})
+            total += area
+            if not ok:
+                union_ok = False
+
+        result["sublayers"][sl] = {
+            "objects": objects,
+            "z_totals": z_totals,
+            "total": total,
+            "union_ok": union_ok,
+            "skipped": skipped,
+        }
+        result["overall_total"] += total
+
+    return result
 
 
 def calc_r1(parent_layer, obj_key, room_target_key):
@@ -1011,11 +1088,16 @@ class LinderoForm(forms.Form):
         self._last_s2 = None   # {objects, total, union_ok}
         self._last_s3 = None   # {sublayers, overall_total}
         self._last_s4 = None   # {tree, overall_total, warnings}
+        self._last_s5 = None   # {sublayers, overall_total}
 
         # Search-filter updater functions for key ComboBoxes (populated by tab builders)
         self._ks_combos = []   # [updater, ...] for static key combos
         self._ks_write  = None # updater for _write_key_combo (has extra "Area" item)
         self._ks_s4     = {}   # {cb: updater} for dynamic S4 rows
+        self._ks_layer_s2     = None   # layer search updaters — set by tab builders
+        self._ks_layer_parent = None
+        self._ks_layer_s4_par = None
+        self._ks_layer_s5_par = None
 
         # R1 / R2 chart state
         self._r1_entries = []
@@ -1043,6 +1125,7 @@ class LinderoForm(forms.Form):
         self.tabs.Pages.Add(self._tab_s2())
         self.tabs.Pages.Add(self._tab_s3())
         self.tabs.Pages.Add(self._tab_s4())
+        self.tabs.Pages.Add(self._tab_s5())
         self.tabs.Pages.Add(self._tab_r1())
         self.tabs.Pages.Add(self._tab_r2())
         self.tabs.Pages.Add(self._tab_settings())
@@ -1207,9 +1290,11 @@ class LinderoForm(forms.Form):
 
         layer_lbl = forms.Label()
         layer_lbl.Text = "Layer:"
-        self.layer_s2_dd = forms.DropDown()
-        self._populate_layer_dd(self.layer_s2_dd)
+        self.layer_s2_dd = forms.ComboBox()
+        self.layer_s2_dd.DataStore = list(self.available_layers)
+        self.layer_s2_dd.PlaceholderText = "Type to filter layers…"
         self.layer_s2_dd.Width = 300
+        self._ks_layer_s2 = _t.bind_key_search(self.layer_s2_dd, self.available_layers)
         controls.AddRow(layer_lbl, self.layer_s2_dd)
 
         obj_key_lbl = forms.Label()
@@ -1244,13 +1329,21 @@ class LinderoForm(forms.Form):
         desc.Text = "Parent layer + sublayers (each sublayer = one level / floor)."
         desc.TextColor = _t.TEXT_MUTED
         controls.AddRow(desc)
+
+        sub3 = forms.Label()
+        sub3.Text = "Sublayer = Floor"
+        sub3.Font = _t.F_SANS_B
+        sub3.TextColor = _t.HEADER
+        controls.AddRow(sub3)
         controls.AddRow(None)
 
         parent_lbl = forms.Label()
         parent_lbl.Text = "Parent Layer:"
-        self.parent_layer_dd = forms.DropDown()
-        self._populate_layer_dd(self.parent_layer_dd)
+        self.parent_layer_dd = forms.ComboBox()
+        self.parent_layer_dd.DataStore = list(self.available_layers)
+        self.parent_layer_dd.PlaceholderText = "Type to filter layers…"
         self.parent_layer_dd.Width = 300
+        self._ks_layer_parent = _t.bind_key_search(self.parent_layer_dd, self.available_layers)
         controls.AddRow(parent_lbl, self.parent_layer_dd)
         controls.AddRow(None)
 
@@ -1349,9 +1442,11 @@ class LinderoForm(forms.Form):
         pl_row.Padding = drawing.Padding(0, 4, 0, 4)
         pl_lbl = forms.Label()
         pl_lbl.Text = "Parent Layer:"
-        self.parent_layer_s4_dd = forms.DropDown()
-        self._populate_layer_dd(self.parent_layer_s4_dd)
+        self.parent_layer_s4_dd = forms.ComboBox()
+        self.parent_layer_s4_dd.DataStore = list(self.available_layers)
+        self.parent_layer_s4_dd.PlaceholderText = "Type to filter layers…"
         self.parent_layer_s4_dd.Width = 300
+        self._ks_layer_s4_par = _t.bind_key_search(self.parent_layer_s4_dd, self.available_layers)
         pl_row.AddRow(pl_lbl, self.parent_layer_s4_dd)
         layout.Items.Add(forms.StackLayoutItem(pl_row))
 
@@ -1446,6 +1541,80 @@ class LinderoForm(forms.Form):
     # ------------------------------------------------------------------
     # Tab builders — R1 / R2
     # ------------------------------------------------------------------
+
+    def _tab_s5(self):
+        page = forms.TabPage()
+        page.Text = "S5 — Group Hierarchy"
+
+        controls = forms.DynamicLayout()
+        controls.DefaultSpacing = drawing.Size(5, 6)
+        controls.Padding = drawing.Padding(8)
+
+        desc = forms.Label()
+        desc.Text = "Parent layer + sublayers (each sublayer = one group). Objects at different heights within a group are summed as separate floors."
+        desc.TextColor = _t.TEXT_MUTED
+        controls.AddRow(desc)
+
+        sub5 = forms.Label()
+        sub5.Text = "Sublayer = Group"
+        sub5.Font = _t.F_SANS_B
+        sub5.TextColor = _t.HEADER
+        controls.AddRow(sub5)
+        controls.AddRow(None)
+
+        parent_lbl = forms.Label()
+        parent_lbl.Text = "Parent Layer:"
+        self.parent_layer_s5_dd = forms.ComboBox()
+        self.parent_layer_s5_dd.DataStore = list(self.available_layers)
+        self.parent_layer_s5_dd.PlaceholderText = "Type to filter layers…"
+        self.parent_layer_s5_dd.Width = 300
+        self._ks_layer_s5_par = _t.bind_key_search(self.parent_layer_s5_dd, self.available_layers)
+        controls.AddRow(parent_lbl, self.parent_layer_s5_dd)
+        controls.AddRow(None)
+
+        obj_key_lbl = forms.Label()
+        obj_key_lbl.Text = "Object Key:"
+        self.obj_key_s5 = forms.ComboBox()
+        self.obj_key_s5.DataStore = self.available_keys
+        self.obj_key_s5.PlaceholderText = "User text key for object labels"
+        self.obj_key_s5.Width = 300
+        self._ks_combos.append(_t.bind_key_search(self.obj_key_s5, self.available_keys))
+        controls.AddRow(obj_key_lbl, self.obj_key_s5)
+
+        grp_hdr = forms.Label()
+        grp_hdr.Text = "Groups — Combined Footprint (per Z band)"
+        grp_hdr.Font = _t.F_HEAD
+        self.results_s5_groups_grid = self._make_results_grid([(True, 0), (False, 110)])
+        grp_pane = forms.StackLayout()
+        grp_pane.Orientation = forms.Orientation.Vertical
+        grp_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        grp_pane.Items.Add(forms.StackLayoutItem(grp_hdr))
+        grp_pane.Items.Add(forms.StackLayoutItem(self.results_s5_groups_grid, True))
+
+        obj_hdr = forms.Label()
+        obj_hdr.Text = "Objects — Detail"
+        obj_hdr.Font = _t.F_HEAD
+        self.results_s5_objects_grid = self._make_results_grid([(True, 0), (False, 110)])
+        obj_pane = forms.StackLayout()
+        obj_pane.Orientation = forms.Orientation.Vertical
+        obj_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        obj_pane.Items.Add(forms.StackLayoutItem(obj_hdr))
+        obj_pane.Items.Add(forms.StackLayoutItem(self.results_s5_objects_grid, True))
+
+        splitter = forms.Splitter()
+        splitter.Orientation = forms.Orientation.Vertical
+        splitter.Panel1 = grp_pane
+        splitter.Panel2 = obj_pane
+        splitter.Position = 220
+
+        layout = forms.StackLayout()
+        layout.Orientation = forms.Orientation.Vertical
+        layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        layout.Items.Add(forms.StackLayoutItem(controls))
+        layout.Items.Add(forms.StackLayoutItem(splitter, True))
+
+        page.Content = layout
+        return page
 
     def _tab_r1(self):
         page = forms.TabPage()
@@ -1618,6 +1787,26 @@ class LinderoForm(forms.Form):
         layout.AddRow(None, dec_hint)
         layout.AddRow(None)
 
+        zh_lbl = forms.Label()
+        zh_lbl.Text = "Z-Height Tolerance:"
+        self.z_height_tol_stepper = forms.NumericStepper()
+        self.z_height_tol_stepper.MinValue      = 0.0
+        self.z_height_tol_stepper.MaxValue      = 100.0
+        self.z_height_tol_stepper.Value         = 0.5
+        self.z_height_tol_stepper.DecimalPlaces = 2
+        self.z_height_tol_stepper.Increment     = 0.1
+        self.z_height_tol_stepper.Width         = 80
+        zh_hint = forms.Label()
+        zh_hint.Text = (
+            "Min. Z gap (model units) to treat same-layer objects as separate floors.\n"
+            "S1 and S2 only — S3, S4, R1, R2 use sublayers to separate floors\n"
+            "and are not affected by this setting."
+        )
+        zh_hint.TextColor = _t.TEXT_MUTED
+        layout.AddRow(zh_lbl, self.z_height_tol_stepper)
+        layout.AddRow(None, zh_hint)
+        layout.AddRow(None)
+
         # ── R1 / R2 Data Source ───────────────────────────────────────
         sep2 = forms.Label()
         sep2.Text = "─" * 42
@@ -1702,30 +1891,25 @@ class LinderoForm(forms.Form):
         layout.AddRow(save_btn, load_btn)
         layout.AddRow(None, cfg_hint)
 
-        page.Content = layout
+        scroll = forms.Scrollable()
+        scroll.ExpandContentWidth = True
+        scroll.ExpandContentHeight = False
+        scroll.Content = layout
+        page.Content = scroll
         return page
 
     # ------------------------------------------------------------------
     # Layer dropdown helpers
     # ------------------------------------------------------------------
 
-    def _populate_layer_dd(self, dd):
-        dd.Items.Clear()
-        for name in self.available_layers:
-            dd.Items.Add(name)
-        if self.available_layers:
-            dd.SelectedIndex = 0
-
     def _selected_layer(self, dd):
-        idx = dd.SelectedIndex
-        if idx < 0 or idx >= len(self.available_layers):
-            return None
-        return self.available_layers[idx]
+        text = (dd.Text or "").strip()
+        return text if text in self.available_layers else None
 
-    def _restore_layer_dd(self, dd, prev_name):
-        self._populate_layer_dd(dd)
-        if prev_name and prev_name in self.available_layers:
-            dd.SelectedIndex = self.available_layers.index(prev_name)
+    def _restore_layer_dd(self, dd, prev_name, updater):
+        updater(self.available_layers)
+        if not prev_name or prev_name not in self.available_layers:
+            dd.Text = ""
 
     # ------------------------------------------------------------------
     # Event handlers — model / navigation
@@ -1735,6 +1919,7 @@ class LinderoForm(forms.Form):
         prev_s2     = self._selected_layer(self.layer_s2_dd)
         prev_parent = self._selected_layer(self.parent_layer_dd)
         prev_s4_par = self._selected_layer(self.parent_layer_s4_dd)
+        prev_s5_par = self._selected_layer(self.parent_layer_s5_dd)
 
         self.available_keys   = get_all_user_text_keys()
         self.available_layers = all_layer_names()
@@ -1745,9 +1930,10 @@ class LinderoForm(forms.Form):
         for upd in self._ks_s4.values():
             upd(self.available_keys)
 
-        self._restore_layer_dd(self.layer_s2_dd,        prev_s2)
-        self._restore_layer_dd(self.parent_layer_dd,    prev_parent)
-        self._restore_layer_dd(self.parent_layer_s4_dd, prev_s4_par)
+        self._restore_layer_dd(self.layer_s2_dd,        prev_s2,     self._ks_layer_s2)
+        self._restore_layer_dd(self.parent_layer_dd,    prev_parent, self._ks_layer_parent)
+        self._restore_layer_dd(self.parent_layer_s4_dd, prev_s4_par, self._ks_layer_s4_par)
+        self._restore_layer_dd(self.parent_layer_s5_dd, prev_s5_par, self._ks_layer_s5_par)
 
         self._ks_write(["Area"] + list(self.available_keys))
 
@@ -1768,8 +1954,9 @@ class LinderoForm(forms.Form):
                 1: self._run_s2,
                 2: self._run_s3,
                 3: self._run_s4,
-                4: self._run_r1,
-                5: self._run_r2,
+                4: self._run_s5,
+                5: self._run_r1,
+                6: self._run_r2,
             }
             fn = runners.get(idx)
             if fn:
@@ -1794,10 +1981,14 @@ class LinderoForm(forms.Form):
             self.results_s4_grid.DataStore = forms.TreeGridItemCollection()
             self._last_s4 = None
         elif idx == 4:
+            self.results_s5_groups_grid.DataStore  = forms.TreeGridItemCollection()
+            self.results_s5_objects_grid.DataStore = forms.TreeGridItemCollection()
+            self._last_s5 = None
+        elif idx == 5:
             self._r1_entries = []
             self.warn_r1.Visible = False
             self.chart_r1.Invalidate()
-        elif idx == 5:
+        elif idx == 6:
             self._r2_entries = []
             self.warn_r2.Visible = False
             self.chart_r2.Invalidate()
@@ -1831,10 +2022,10 @@ class LinderoForm(forms.Form):
 
     def on_export_png(self, _sender, _e):
         idx = self.tabs.SelectedIndex
-        if idx == 4:
+        if idx == 5:
             entries, tol, unit = self._r1_entries, self._r1_tol, self._r1_unit
             default_name = "Lindero_R1_RoomAnalysis"
-        elif idx == 5:
+        elif idx == 6:
             entries, tol, unit = self._r2_entries, self._r2_tol, self._r2_unit
             default_name = "Lindero_R2_GroupAnalysis"
         else:
@@ -1892,6 +2083,9 @@ class LinderoForm(forms.Form):
         elif idx == 2 and self._last_s3:
             for sl_data in self._last_s3["sublayers"].values():
                 objects += sl_data["objects"]
+        elif idx == 4 and self._last_s5:
+            for sl_data in self._last_s5["sublayers"].values():
+                objects += sl_data["objects"]
 
         if not objects:
             self.status_label.Text = "No calculated data — run Calculate first on S1, S2, or S3."
@@ -1940,6 +2134,7 @@ class LinderoForm(forms.Form):
             "r1r2_source":       self.r1r2_source_dd.SelectedIndex,
             "r1_level_index":    int(self.r1_level_stepper.Value),
             "r2_level_index":    int(self.r2_level_stepper.Value),
+            "z_height_tol":      self.z_height_tol_stepper.Value,
         }
         try:
             with open(path, "w", encoding="utf-8") as f:
@@ -1969,11 +2164,12 @@ class LinderoForm(forms.Form):
             self.r1r2_source_dd.SelectedIndex = int(cfg.get("r1r2_source", 0))
             self.r1_level_stepper.Value   = float(cfg.get("r1_level_index", 1))
             self.r2_level_stepper.Value   = float(cfg.get("r2_level_index", 2))
+            self.z_height_tol_stepper.Value = float(cfg.get("z_height_tol", 0.5))
 
             # Restore S4 parent layer
             s4_par = cfg.get("s4_parent_layer", "")
             if s4_par and s4_par in self.available_layers:
-                self.parent_layer_s4_dd.SelectedIndex = self.available_layers.index(s4_par)
+                self.parent_layer_s4_dd.Text = s4_par
 
             # Restore S4 key sequence
             key_seq = cfg.get("s4_key_sequence", [])
@@ -1999,7 +2195,7 @@ class LinderoForm(forms.Form):
 
     def _run_s1(self, unit):
         name_key = self.name_key_combo.Text.strip()
-        data = calc_s1(name_key)
+        data = calc_s1(name_key, float(self.z_height_tol_stepper.Value))
 
         if not data["objects"]:
             self.results_s1_grid.DataStore = forms.TreeGridItemCollection()
@@ -2027,7 +2223,7 @@ class LinderoForm(forms.Form):
             return
 
         obj_key = self.obj_key_s2.Text.strip()
-        data    = calc_s2(layer_name, obj_key)
+        data    = calc_s2(layer_name, obj_key, float(self.z_height_tol_stepper.Value))
 
         if not data["objects"]:
             self.results_s2_grid.DataStore = forms.TreeGridItemCollection()
@@ -2285,6 +2481,54 @@ class LinderoForm(forms.Form):
         self.results_s3_objects_grid.DataStore = collection
 
     # ------------------------------------------------------------------
+    # Grid populate helpers — S5
+    # ------------------------------------------------------------------
+
+    def _populate_s5_groups_grid(self, data):
+        """Group header rows with Z-band children; overall total at the bottom."""
+        collection = forms.TreeGridItemCollection()
+        for sl, sl_data in data["sublayers"].items():
+            union_note = "  [union failed]" if not sl_data["union_ok"] else ""
+            grp_item = forms.TreeGridItem()
+            grp_item.Values = [
+                f"▸ {short_name(sl)}{union_note}",
+                _fmt(sl_data["total"]).rjust(10),
+                10,
+            ]
+            grp_item.Expanded = True
+            for i, zt in enumerate(sl_data["z_totals"]):
+                child = forms.TreeGridItem()
+                child.Values = [f"  Z = {zt['z']:.2f}", _fmt(zt["area"]).rjust(10), i % 2]
+                grp_item.Children.Add(child)
+            if sl_data.get("skipped", 0) > 0:
+                w = forms.TreeGridItem()
+                w.Values = [f"  {sl_data['skipped']} object(s) skipped", "", 40]
+                grp_item.Children.Add(w)
+            collection.Add(grp_item)
+        total_item = forms.TreeGridItem()
+        total_item.Values = ["OVERALL TOTAL", _fmt(data["overall_total"]).rjust(10), 30]
+        collection.Add(total_item)
+        self.results_s5_groups_grid.DataStore = collection
+
+    def _populate_s5_objects_grid(self, data):
+        """Group header rows with object children (name + individual area)."""
+        collection = forms.TreeGridItemCollection()
+        for sl, sl_data in data["sublayers"].items():
+            grp_item = forms.TreeGridItem()
+            grp_item.Values = [f"▸ {short_name(sl)}", "", 10]
+            grp_item.Expanded = True
+            for i, o in enumerate(sl_data["objects"]):
+                child = forms.TreeGridItem()
+                child.Values = [o["name"], _fmt(o["area"]).rjust(10), i % 2]
+                grp_item.Children.Add(child)
+            if sl_data.get("skipped", 0) > 0:
+                w = forms.TreeGridItem()
+                w.Values = [f"  {sl_data['skipped']} object(s) skipped", "", 40]
+                grp_item.Children.Add(w)
+            collection.Add(grp_item)
+        self.results_s5_objects_grid.DataStore = collection
+
+    # ------------------------------------------------------------------
     # Per-scenario runner — S4
     # ------------------------------------------------------------------
 
@@ -2328,6 +2572,45 @@ class LinderoForm(forms.Form):
         self.status_label.TextColor = (
             _t.TEXT_WARN if n_warn else _t.TEXT_OK
         )
+
+    # ------------------------------------------------------------------
+    # Per-scenario runner — S5
+    # ------------------------------------------------------------------
+
+    def _run_s5(self, unit):
+        parent = self._selected_layer(self.parent_layer_s5_dd)
+        if not parent:
+            self.status_label.Text = "Please select a parent layer."
+            self.status_label.TextColor = _t.TEXT_ERROR
+            return
+
+        obj_key = self.obj_key_s5.Text.strip()
+        z_tol   = float(self.z_height_tol_stepper.Value)
+        data    = calc_s5(parent, obj_key, z_tol)
+
+        non_empty = [sl for sl, d in data["sublayers"].items() if d["objects"]]
+        if not non_empty:
+            self.results_s5_groups_grid.DataStore  = forms.TreeGridItemCollection()
+            self.results_s5_objects_grid.DataStore = forms.TreeGridItemCollection()
+            self.status_label.Text = "No objects found in sublayers."
+            self.status_label.TextColor = _t.TEXT_WARN
+            return
+
+        self._populate_s5_groups_grid(data)
+        self._populate_s5_objects_grid(data)
+        self._last_s5 = data
+        self._export_data = {
+            "scenario": 5, "unit": unit,
+            "params": {"parent": parent, "obj_key": obj_key},
+            "sublayers": data["sublayers"],
+            "overall_total": data["overall_total"],
+        }
+        self.status_label.Text = (
+            f"S5  —  '{short_name(parent)}'  |  "
+            f"{len(data['sublayers'])} group(s)  |  "
+            f"Overall total: {_fmt(data['overall_total'])} {unit}"
+        )
+        self.status_label.TextColor = _t.TEXT_OK
 
     # ------------------------------------------------------------------
     # Per-scenario runners — R1 / R2
