@@ -1824,6 +1824,7 @@ class LinderoForm(forms.Form):
         self.r1r2_source_dd = forms.DropDown()
         self.r1r2_source_dd.Items.Add("S3 keys")
         self.r1r2_source_dd.Items.Add("S4 hierarchy")
+        self.r1r2_source_dd.Items.Add("S5 hierarchy")
         self.r1r2_source_dd.SelectedIndex = 0
         self.r1r2_source_dd.Width = 180
         src_hint = forms.Label()
@@ -2617,7 +2618,7 @@ class LinderoForm(forms.Form):
     # ------------------------------------------------------------------
 
     def _run_r1(self, unit):
-        source_idx = self.r1r2_source_dd.SelectedIndex  # 0=S3 keys, 1=S4 hierarchy
+        source_idx = self.r1r2_source_dd.SelectedIndex  # 0=S3 keys, 1=S4 hierarchy, 2=S5 hierarchy
 
         if source_idx == 0:
             parent  = self._selected_layer(self.parent_layer_dd)
@@ -2630,7 +2631,7 @@ class LinderoForm(forms.Form):
                 self.status_label.Text = "R1 uses S3 Object Key — set one on the S3 tab."
                 self.status_label.TextColor = _t.TEXT_WARN
                 return
-        else:
+        elif source_idx == 1:
             parent  = self._selected_layer(self.parent_layer_s4_dd)
             key_seq = [cb.Text.strip() for cb in self._s4_key_rows]
             idx     = int(self.r1_level_stepper.Value) - 1   # 0-based
@@ -2645,6 +2646,17 @@ class LinderoForm(forms.Form):
                 self.status_label.TextColor = _t.TEXT_WARN
                 return
             obj_key = key_seq[idx]
+        else:
+            parent  = self._selected_layer(self.parent_layer_s5_dd)
+            obj_key = self.obj_key_s5.Text.strip()
+            if not parent:
+                self.status_label.Text = "R1 uses S5 Parent Layer — select one on the S5 tab."
+                self.status_label.TextColor = _t.TEXT_ERROR
+                return
+            if not obj_key:
+                self.status_label.Text = "R1 uses S5 Object Key — set one on the S5 tab."
+                self.status_label.TextColor = _t.TEXT_WARN
+                return
 
         room_target_key = self.room_target_key_dd.Text.strip()
         tol  = self.tolerance_stepper.Value / 100.0
@@ -2672,7 +2684,7 @@ class LinderoForm(forms.Form):
             self.warn_r1.Visible = False
 
         n_warn = len(data["warnings"])
-        src_tag = "S3" if source_idx == 0 else "S4"
+        src_tag = {0: "S3", 1: "S4", 2: "S5"}.get(source_idx, "S3")
         self.status_label.Text = (
             f"R1  [{src_tag}]  —  {n} room type(s)  |  Tolerance: {tol*100:.1f}%"
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
@@ -2682,7 +2694,12 @@ class LinderoForm(forms.Form):
         )
 
     def _run_r2(self, unit):
-        source_idx = self.r1r2_source_dd.SelectedIndex  # 0=S3 keys, 1=S4 hierarchy
+        source_idx = self.r1r2_source_dd.SelectedIndex  # 0=S3 keys, 1=S4 hierarchy, 2=S5 hierarchy
+
+        if source_idx == 2:
+            self.status_label.Text = "R2 is not available for S5 — groups are defined by sublayer, not a key. Use R1 with S5."
+            self.status_label.TextColor = _t.TEXT_WARN
+            return
 
         if source_idx == 0:
             parent  = self._selected_layer(self.parent_layer_dd)
@@ -2737,7 +2754,7 @@ class LinderoForm(forms.Form):
             self.warn_r2.Visible = False
 
         n_warn = len(data["warnings"])
-        src_tag = "S3" if source_idx == 0 else "S4"
+        src_tag = "S3" if source_idx == 0 else "S4"  # S5 returns early above
         self.status_label.Text = (
             f"R2  [{src_tag}]  —  {n} group(s)  |  Tolerance: {tol*100:.1f}%"
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
