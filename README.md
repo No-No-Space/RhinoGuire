@@ -16,6 +16,10 @@ Color-code Rhino objects based on their metadata values. Three-step workflow: in
 
 Search and select Rhino objects by their metadata using include/exclude conditions with 8 match types (Contains, Equals, Starts with, Ends with, and their negations). Supports pre-selection filtering and cross-search queries.
 
+### [Pregonero](Tagging/) — Object Tagger
+
+Tag objects with leaders built from a reusable text template, like Revit's *tag by category* tool. Template placeholders (`{KeyName}`) are inserted as **live Rhino text fields** (`%<UserText("guid","Key")>%`), so each leader reflects the tagged object's own user text and updates when it changes. Pick a template object to load its keys, write the template, choose a Dimension Style and optional text height, then click objects to tag (first click sets the arrow, second sets the text). Keys an object is missing are created with the value `TBD`. Modeless window; one Undo per session.
+
 ### [Lindero](AreaMeasurer/) — Footprint Area Calculator
 
 Calculates the **footprint area** of Rhino objects — the plan area as seen from directly above (XY projection), distinct from Rhino's built-in `Area` command which sums all faces.
@@ -53,7 +57,7 @@ Slopes accept H:V ratio, percent, or degrees. See [`TerrainTools/`](TerrainTools
 
 - **Rhino 8** with CPython 3
 - **openpyxl** — required by Arriero, Chivito and CutFillReport (installed automatically via `# r: openpyxl` header)
-- Baquiano, Lindero, Sebucan, PadGrader and WayGrader have no external dependencies
+- Baquiano, Pregonero, Lindero, Sebucan, PadGrader and WayGrader have no external dependencies
 
 ## Quick Start
 

@@ -44,6 +44,20 @@
 #        Data source: S3 keys or S4 hierarchy (configurable in Settings).
 # _____________________________________________________________________
 # Last update:
+# - [01.07.2026] - 0.7 Arrangement conservation check (regions covered by an
+#                     object must reproduce its own area, else the whole
+#                     arrangement is rejected — coincident tile edges corrupt
+#                     CreateBooleanRegions even at tight tolerance); new
+#                     pairwise inclusion–exclusion merge as second path
+# - [01.07.2026] - 0.6 Hole-aware footprints: inner loops (courtyards/shafts)
+#                     subtracted per object; overlap merge rebuilt on
+#                     Curve.CreateBooleanRegions arrangement + point
+#                     classification (exact for overlaps, holes, and ring
+#                     layouts); 2D boolean tolerance clamped to ~1 mm
+#                     (coarse doc tolerances corrupt the arrangement);
+#                     merged total bounded by sum of individual regions;
+#                     version + file timestamp shown in UI;
+#                     Write Area honors Settings decimals
 # - [07.05.2026] - 0.5 Overlap removal for S1; closed curves, planar surfaces,
 #                     and hatches supported; S3 Group Key first, split result
 #                     panels; configurable decimal places in Settings;
@@ -75,6 +89,18 @@ if _rg_root not in _sys.path:
     _sys.path.insert(0, _rg_root)
 from ui import theme as _t
 import importlib as _importlib; _importlib.reload(_t)
+
+# Version shown in the UI. The file timestamp is added so ANY edit to this
+# file is visible in the running window — no stale-instance guessing.
+__version__ = "0.7"
+try:
+    import datetime as _dt
+    _BUILD_STAMP = _dt.datetime.fromtimestamp(
+        _os.path.getmtime(_os.path.abspath(__file__))
+    ).strftime("%Y-%m-%d %H:%M")
+except Exception:
+    _BUILD_STAMP = "unknown"
+_VERSION_TEXT = f"v{__version__}  ·  file {_BUILD_STAMP}"
 
 # ============================================================================
 # PERSISTENT PREFERENCES (last-used folder per action)
@@ -189,30 +215,35 @@ def _brep_footprint_curves(brep):
         return [rg.PolylineCurve(pts)]
 
     min_z = min(z for _, z in horiz)
-    bottom = [f for f, z in horiz if abs(z - min_z) <= tol * 2]
+    # Cap the "same level" test: with a coarse doc tolerance (0.1 m) tol*2
+    # could reach 0.2 and pull in the TOP face of a thin slab as well.
+    ztol = min(tol * 2.0, _bool_tol() * 20.0)
+    bottom = [f for f, z in horiz if abs(z - min_z) <= ztol]
 
     curves = []
     for face in bottom:
-        border = None
-        if face.OuterLoop is not None:
-            border = face.OuterLoop.To3dCurve()
-        # Fallback for untrimmed/planar faces where OuterLoop.To3dCurve() fails
-        if border is None:
+        # All loops: outer boundary AND inner (hole) loops. Holes matter —
+        # a floor plate with a courtyard opening must not count the void.
+        # Nesting is resolved later by _region_area / CreatePlanarBreps.
+        loops = []
+        try:
+            loops = [lp.To3dCurve() for lp in face.Loops]
+            loops = [c for c in loops if c is not None]
+        except Exception:
+            loops = []
+        # Fallback for untrimmed/planar faces where loop extraction fails
+        if not loops:
             face_copy = face.DuplicateFace(False)
             if face_copy:
                 edge_curves = face_copy.DuplicateEdgeCurves(True)
                 if edge_curves:
                     joined = rg.Curve.JoinCurves(edge_curves, tol)
-                    for j in joined:
-                        if j.IsClosed:
-                            border = j
-                            break
-        if border is None:
-            continue
-        dup = border.DuplicateCurve()
-        dup.Transform(proj)
-        if dup.IsClosed:
-            curves.append(dup)
+                    loops = [j for j in joined if j.IsClosed]
+        for border in loops:
+            dup = border.DuplicateCurve()
+            dup.Transform(proj)
+            if dup.IsClosed:
+                curves.append(dup)
     return curves
 
 
@@ -238,7 +269,8 @@ def get_footprint_curves(obj_guid):
 
         if isinstance(geom, rg.Hatch):
             proj = rg.Transform.PlanarProjection(rg.Plane.WorldXY)
-            loops = geom.Get3dCurves(True)
+            loops = list(geom.Get3dCurves(True) or [])   # outer loops
+            loops += list(geom.Get3dCurves(False) or [])  # inner (hole) loops
             if loops:
                 result = []
                 for loop in loops:
@@ -270,9 +302,32 @@ def curve_area(curve):
         return 0.0
 
 
+def _bool_tol():
+    """
+    Tolerance for the 2D region math (arrangement, planar breps, coverage),
+    clamped to ~1 mm in document units.
+
+    Do NOT pass sc.doc.ModelAbsoluteTolerance straight into these calls: a
+    coarse document tolerance (e.g. 0.1 in a meters file) makes Rhino's
+    boolean/arrangement operations weld distinct edges and return corrupt
+    regions — diagnosed 01.07.2026 with debug_merge.py (RegionCount and
+    region areas were garbage at tol=0.1, correct at 0.001).
+    """
+    tol = sc.doc.ModelAbsoluteTolerance
+    try:
+        mm = Rhino.RhinoMath.UnitScale(
+            Rhino.UnitSystem.Millimeters, sc.doc.ModelUnitSystem
+        )
+        if mm and mm > 0:
+            return min(tol, mm)
+    except Exception:
+        pass
+    return min(tol, 0.001)
+
+
 def get_footprint_area(obj_guid):
-    """Footprint area of a single object (sum of bottom face areas)."""
-    return sum(curve_area(c) for c in get_footprint_curves(obj_guid))
+    """Footprint area of a single object (bottom faces, holes subtracted)."""
+    return _region_area(get_footprint_curves(obj_guid))
 
 
 def get_object_bottom_z(guid):
@@ -317,22 +372,261 @@ def _group_by_z(guids, z_tol):
     return [band[1] for band in groups]
 
 
+def _region_area(curves):
+    """
+    Area of closed planar curves treated as region boundaries: nested curves
+    count as holes (subtracted), never as extra area.
+
+    Curve.CreateBooleanUnion can return inner (hole) loops — e.g. footprints
+    arranged in a ring around a courtyard. Summing absolute curve areas would
+    then count the enclosed void as footprint (outer loop already contains it,
+    and the hole loop would be added again). CreatePlanarBreps resolves the
+    nesting: inner loops become brep holes, so GetArea() is correct.
+    """
+    curves = list(curves)
+    if len(curves) == 1:
+        return curve_area(curves[0])
+    tol = _bool_tol()
+    try:
+        breps = rg.Brep.CreatePlanarBreps(curves, tol)
+    except Exception:
+        breps = None
+    if breps:
+        return sum(b.GetArea() for b in breps)
+    return sum(curve_area(c) for c in curves)
+
+
+def _interior_point(brep):
+    """A point strictly inside a planar Brep face (avoids holes and edges)."""
+    try:
+        face = brep.Faces[0]
+        du, dv = face.Domain(0), face.Domain(1)
+        for n in (5, 9, 17):
+            for iu in range(1, n):
+                for iv in range(1, n):
+                    u = du.Min + du.Length * iu / float(n)
+                    v = dv.Min + dv.Length * iv / float(n)
+                    if face.IsPointOnFace(u, v) == rg.PointFaceRelation.Interior:
+                        return face.PointAt(u, v)
+    except Exception:
+        pass
+    return None
+
+
+def _covered_by_object(pt, breps, loops, tol):
+    """
+    True if pt lies on an object's footprint region.
+
+    Primary test: distance from pt to the object's planar region Breps —
+    zero (within tolerance) iff pt is on a face; points in a hole or outside
+    are pulled to the boundary, giving a positive distance. This reuses the
+    exact same Breps that produce the per-object areas, so merge coverage
+    can never disagree with the individual results.
+    Fallback (no Breps): even-odd parity over the raw loops via
+    Curve.Contains — less robust, some curve types misreport containment.
+    """
+    if breps:
+        for b in breps:
+            try:
+                cp = b.ClosestPoint(pt)
+                if cp and cp.IsValid and cp.DistanceTo(pt) <= tol * 2.0:
+                    return True
+            except Exception:
+                pass
+        return False
+    plane = rg.Plane.WorldXY
+    inside = 0
+    for c in loops:
+        try:
+            if c.Contains(pt, plane, tol) == rg.PointContainment.Inside:
+                inside += 1
+        except Exception:
+            pass
+    return inside % 2 == 1
+
+
+def _loop_brep(curve, tol):
+    """Planar Brep of a single closed loop treated as filled, or None."""
+    try:
+        bs = rg.Brep.CreatePlanarBreps([curve], tol)
+        return bs[0] if bs else None
+    except Exception:
+        return None
+
+
+def _pairwise_union_area(per_object_regions, tol, sliver):
+    """
+    Union area via inclusion–exclusion truncated at pairs:
+
+        total = Σ area_i  −  Σ_{i<j} area(R_i ∩ R_j)
+
+    Pairwise region intersections are computed loop-by-loop with
+    Curve.CreateBooleanIntersection — two-curve booleans are far better
+    conditioned than the global arrangement, which corrupts on coincident
+    tile edges (debug sessions 01.07.2026). Holes are handled with signed
+    nesting: R = Σ outer − Σ hole, so
+        area(R_i ∩ R_j) = Σ_a Σ_b sign_a · sign_b · area(a ∩ b).
+
+    Exact unless three or more objects overlap on the same spot (rare in
+    floor-plate models) — such triple overlaps make this an undercount.
+    Returns (area, ok).
+    """
+    intersect = getattr(rg.Curve, "CreateBooleanIntersection", None)
+    if intersect is None:
+        return 0.0, False
+
+    objs = []
+    total = 0.0
+    for breps_k, loops_k in per_object_regions:
+        # Sign per loop: +1 if inside an even number of the object's other
+        # loops (outer boundary / island), -1 if odd (hole).
+        loop_breps = [_loop_brep(c, tol) for c in loops_k]
+        signs = []
+        for li in range(len(loops_k)):
+            b = loop_breps[li]
+            pt = _interior_point(b) if b else None
+            if pt is None and len(loops_k) > 1:
+                return 0.0, False  # cannot classify nesting reliably
+            depth = 0
+            if pt is not None:
+                for lj, other in enumerate(loop_breps):
+                    if lj == li or other is None:
+                        continue
+                    try:
+                        cp = other.ClosestPoint(pt)
+                        if cp and cp.IsValid and cp.DistanceTo(pt) <= tol * 2.0:
+                            depth += 1
+                    except Exception:
+                        pass
+            signs.append(1 if depth % 2 == 0 else -1)
+        area_k = (sum(b.GetArea() for b in breps_k) if breps_k
+                  else _region_area(loops_k))
+        total += area_k
+        objs.append((loops_k, signs))
+
+    for i in range(len(objs)):
+        loops_i, signs_i = objs[i]
+        for j in range(i + 1, len(objs)):
+            loops_j, signs_j = objs[j]
+            overlap = 0.0
+            for a, sa in zip(loops_i, signs_i):
+                for b, sb in zip(loops_j, signs_j):
+                    try:
+                        xs = intersect(a, b, tol)
+                    except Exception:
+                        return 0.0, False
+                    if xs and len(xs) > 0:
+                        overlap += sa * sb * _region_area(list(xs))
+            if overlap > sliver:
+                total -= overlap
+    return total, True
+
+
 def combined_area(obj_guids):
     """
-    Total footprint area for a list of objects after Boolean Union on their
-    projected outlines (removes overlapping footprints).
+    Total footprint area for a list of objects with overlaps removed.
     Returns (area: float, union_succeeded: bool).
+
+    Primary path (exact for overlaps, holes, and holes covered by other
+    objects): Curve.CreateBooleanRegions builds the planar arrangement of
+    every footprint loop — the minimal faces the loops cut the plane into.
+    Each face is kept iff an interior sample point lies on at least one
+    object's planar-Brep region (holes resolved; see _covered_by_object).
+    NOTE: do not replace this with Curve.CreateBooleanUnion or
+    Brep.CreatePlanarUnion of the raw loops — both treat/collapse hole
+    loops as filled, which re-adds courtyard openings to the total.
+    Fallback path: Curve.CreateBooleanUnion (hole-blind, gross areas).
     """
-    all_curves = []
+    tol = _bool_tol()  # NOT the raw doc tolerance — see _bool_tol()
+    sliver = (tol * 10.0) ** 2  # ignore degenerate arrangement slivers
+
+    all_curves = []          # every loop, flat
+    per_object_regions = []  # (breps or None, loops) per object, for coverage
+    indiv_total = 0.0        # sum of per-object region areas (upper bound)
     for guid in obj_guids:
-        all_curves.extend(get_footprint_curves(guid))
+        curves = get_footprint_curves(guid)
+        if not curves:
+            continue
+        all_curves.extend(curves)
+        breps = None
+        try:
+            breps = rg.Brep.CreatePlanarBreps(curves, tol)
+        except Exception:
+            breps = None
+        per_object_regions.append((list(breps) if breps else None, curves))
+        indiv_total += (sum(b.GetArea() for b in breps) if breps
+                        else _region_area(curves))
 
     if not all_curves:
         return 0.0, False
     if len(all_curves) == 1:
         return curve_area(all_curves[0]), True
+    if len(per_object_regions) == 1:
+        # Single object: no overlap possible, region area handles its holes.
+        return _region_area(per_object_regions[0][1]), True
 
-    tol = sc.doc.ModelAbsoluteTolerance
+    boolean_regions = getattr(rg.Curve, "CreateBooleanRegions", None)
+    if boolean_regions is not None:
+        try:
+            arrangement = boolean_regions(all_curves, rg.Plane.WorldXY, False, tol)
+        except Exception:
+            arrangement = None
+        if arrangement and arrangement.RegionCount > 0:
+            total = 0.0
+            covered_per_obj = [0.0] * len(per_object_regions)
+            resolved = True
+            for i in range(arrangement.RegionCount):
+                loops = list(arrangement.RegionCurves(i) or [])
+                if not loops:
+                    continue
+                try:
+                    breps = rg.Brep.CreatePlanarBreps(loops, tol)
+                except Exception:
+                    breps = None
+                if not breps:
+                    if _region_area(loops) <= sliver:
+                        continue
+                    resolved = False
+                    break
+                for b in breps:
+                    b_area = b.GetArea()
+                    if b_area <= sliver:
+                        continue
+                    pt = _interior_point(b)
+                    if pt is None:
+                        resolved = False
+                        break
+                    hit = False
+                    for k, (breps_k, loops_k) in enumerate(per_object_regions):
+                        if _covered_by_object(pt, breps_k, loops_k, tol):
+                            covered_per_obj[k] += b_area
+                            hit = True
+                    if hit:
+                        total += b_area
+                if not resolved:
+                    break
+            # Conservation check: the arrangement faces covered by object k
+            # partition its footprint, so their areas must sum back to the
+            # object's own area. A corrupt arrangement (coincident tile
+            # edges are the known trigger) fails this loudly in either
+            # direction — under- OR over-counting. Reject it entirely.
+            if resolved:
+                for k, (breps_k, loops_k) in enumerate(per_object_regions):
+                    a_k = (sum(b.GetArea() for b in breps_k) if breps_k
+                           else _region_area(loops_k))
+                    if abs(covered_per_obj[k] - a_k) > max(sliver * 100.0,
+                                                           0.001 * a_k):
+                        resolved = False
+                        break
+            if resolved and total <= indiv_total + sliver:
+                return total, True
+
+    # ── Path 2: pairwise inclusion–exclusion. Robust where the global
+    # arrangement corrupts (coincident seams); exact except for ≥3-way
+    # overlapping objects, which floor-plate models rarely have.
+    pw_total, pw_ok = _pairwise_union_area(per_object_regions, tol, sliver)
+    if pw_ok:
+        return min(max(pw_total, 0.0), indiv_total), True
 
     # Normalize all curves to CCW when viewed from +Z so that Boolean Union
     # works consistently regardless of object type (solid bottom faces come out
@@ -351,9 +645,9 @@ def combined_area(obj_guids):
         unioned = None
 
     if unioned and len(unioned) > 0:
-        return sum(curve_area(c) for c in unioned), True
+        return min(_region_area(unioned), indiv_total), True
 
-    return sum(curve_area(c) for c in normalized), False
+    return min(sum(curve_area(c) for c in normalized), indiv_total), False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -385,7 +679,7 @@ def calc_s1(name_key, z_height_tol=0.5):
         curves = get_footprint_curves(g)
         if not curves:
             skipped += 1
-        area = sum(curve_area(c) for c in curves)
+        area = _region_area(curves)
         lname = rs.ObjectLayer(g) or ""
         layer_groups.setdefault(lname, []).append(g)
         per_obj.append({"guid": str(g), "name": _label(g, name_key), "area": area, "layer": lname})
@@ -451,7 +745,7 @@ def calc_s2(layer_name, obj_key, z_height_tol=0.5):
         curves = get_footprint_curves(g)
         if not curves:
             skipped += 1
-        area = sum(curve_area(c) for c in curves)
+        area = _region_area(curves)
         per_obj.append({"guid": str(g), "name": _label(g, obj_key), "area": area})
     z_bands = _group_by_z(guids, z_height_tol)
     total = 0.0
@@ -490,7 +784,7 @@ def calc_s3(parent_layer, obj_key, grp_key):
                 "guid": str(guid),
                 "name": _label(guid, obj_key),
                 "group": grp_val,
-                "area": sum(curve_area(c) for c in curves),
+                "area": _region_area(curves),
             })
             groups.setdefault(grp_val, []).append(guid)
 
@@ -591,7 +885,7 @@ def calc_s5(parent_layer, obj_key, z_height_tol):
             objects.append({
                 "guid": str(guid),
                 "name": _label(guid, obj_key),
-                "area": sum(curve_area(c) for c in curves),
+                "area": _region_area(curves),
             })
 
         z_bands = _group_by_z(guids, z_height_tol)
@@ -1071,7 +1365,7 @@ class LinderoForm(forms.Form):
 
     def __init__(self):
         super().__init__()
-        self.Title = "Lindero — Footprint Area Calculator"
+        self.Title = f"Lindero — Footprint Area Calculator  {_VERSION_TEXT}"
         self.Padding = drawing.Padding(10)
         self.Resizable = True
         self.MinimumSize = drawing.Size(480, 540)
@@ -1191,7 +1485,18 @@ class LinderoForm(forms.Form):
         )
         self.status_label.Font = _t.F_SANS
         self.status_label.TextColor = _t.TEXT_MUTED
-        outer.Items.Add(forms.StackLayoutItem(self.status_label))
+
+        version_label = forms.Label()
+        version_label.Text = _VERSION_TEXT
+        version_label.Font = _t.F_SANS
+        version_label.TextColor = _t.TEXT_MUTED
+
+        status_row = forms.StackLayout()
+        status_row.Orientation = forms.Orientation.Horizontal
+        status_row.Spacing = _t.SPACE_2
+        status_row.Items.Add(forms.StackLayoutItem(self.status_label, True))
+        status_row.Items.Add(forms.StackLayoutItem(version_label))
+        outer.Items.Add(forms.StackLayoutItem(status_row))
 
         self.Content = outer
 
@@ -2094,12 +2399,13 @@ class LinderoForm(forms.Form):
             return
 
         count = 0
+        dp = int(self.decimal_stepper.Value)  # honor Settings decimal places
         for obj in objects:
             try:
                 guid   = System.Guid(obj["guid"])
                 rh_obj = sc.doc.Objects.FindId(guid)
                 if rh_obj:
-                    rh_obj.Attributes.SetUserString(key, f"{obj['area']:.4f}")
+                    rh_obj.Attributes.SetUserString(key, f"{obj['area']:.{dp}f}")
                     rh_obj.CommitChanges()
                     count += 1
             except Exception:
