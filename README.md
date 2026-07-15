@@ -52,11 +52,17 @@ A suite of three tools sharing one grading engine (`_core`) for **modifying terr
 
 Slopes accept H:V ratio, percent, or degrees. See [`TerrainTools/`](TerrainTools/) for the design docs (`README.md`, `PLAN.md`, `DECISIONS.md`).
 
+### [Trocha](RoadTool/) — Road on Terrain
+
+Drapes a solid road slab onto a terrain from a user-drawn centerline, **without modifying the terrain** — distinct from TerrainTools, which grades/modifies the terrain itself. A persistent window: pick terrain + centerline, set width/thickness, Generate. The top face stays a single clean surface; the slab is buried deep enough into the terrain that it never lifts off over a dip. Create → update is linked to the centerline (re-running replaces, not duplicates), with an Update All sweep and a Merge step that Boolean-unions built roads at junctions.
+
+See [`RoadTool/`](RoadTool/) for the workflow (`README.md`) and full design spec (`road_tool_plan.md`).
+
 ## Requirements
 
 - **Rhino 8** with CPython 3
 - **openpyxl** — required by Arriero, Chivito and CutFillReport (installed automatically via `# r: openpyxl` header)
-- Baquiano, Pregonero, Lindero, Sebucan, PadGrader and WayGrader have no external dependencies
+- Baquiano, Pregonero, Lindero, Sebucan, PadGrader, WayGrader and Trocha have no external dependencies
 
 ## Quick Start
 

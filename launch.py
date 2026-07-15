@@ -21,6 +21,7 @@ SCRIPTS = {
     "PadGrader":     os.path.join(_ROOT, "TerrainTools", "PadGrader",     "PadGrader.py"),
     "WayGrader":     os.path.join(_ROOT, "TerrainTools", "WayGrader",     "WayGrader.py"),
     "CutFillReport": os.path.join(_ROOT, "TerrainTools", "CutFillReport", "CutFillReport.py"),
+    "Trocha":        os.path.join(_ROOT, "RoadTool",      "Trocha.py"),
 }
 
 def launch(key):

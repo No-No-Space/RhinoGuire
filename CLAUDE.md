@@ -21,10 +21,10 @@ RunPythonScript  →  navigate to the tool's .py file
 **Via the central launcher (passing a key):**
 
 ```text
-! _-RunPythonScript "C:/path/to/RhinoGuire/launch.py" "RG_Lindero"
+! _-RunPythonScript "C:/path/to/RhinoGuire/launch.py" "Lindero"
 ```
 
-Available keys: `RG_Lindero`, `RG_Arriero`, `RG_Chivito`, `RG_Sebucan`, `RG_Baquiano`, `RG_PadGrader`, `RG_WayGrader`, `RG_CutFillReport`.
+Available keys (`launch.py`'s `SCRIPTS` dict — no `RG_` prefix; that prefix is only used for the `RG_ROAD_*`-style per-object user strings some tools write, a separate namespace): `Lindero`, `Arriero`, `Chivito`, `Sebucan`, `Baquiano`, `Pregonero`, `PadGrader`, `WayGrader`, `CutFillReport`, `Trocha`.
 
 ## Running Tests
 
@@ -33,6 +33,7 @@ Headless-testable code (pure Python, no Rhino needed):
 ```sh
 python TerrainTools/_core/tests/test_headless.py   # slope conversions, grid-prism volumes
 python AreaMeasurer/tests/test_paths.py            # Lindero layer-path contract (_paths.py)
+python RoadTool/_core/tests/test_headless.py       # Trocha config defaults (geometry/state need Rhino)
 ```
 
 All other code requires a running Rhino session.
@@ -78,6 +79,10 @@ Pure-Python module (no Rhino imports) encoding Lindero v2's hierarchy rules: par
 | `volumes.py` | Grid-prism cut/fill totals; per-station mass-haul for corridors |
 | `meshbuild.py` | `GradeResult` → triangulated Mesh with vertex-color depth tinting |
 | `report.py` | openpyxl workbook writer + Eto `Drawable`→`Bitmap` PNG helpers |
+
+### RoadTool `_core` — same split, one tool
+
+`RoadTool/_core/` holds Trocha's own pure-geometry/state engine (`config.py`, `geometry.py`, `state.py`, `junctions.py`), split out for the same headless-testability reason as `TerrainTools/_core` even though only one tool (`Trocha.py`) consumes it. It reuses `TerrainTools/_core/terrain.py`'s `TerrainModel` for terrain sampling rather than duplicating it — Trocha does not have its own terrain module. See `RoadTool/road_tool_plan.md` for the full design spec and `RoadTool/README.md` for the workflow.
 
 `TerrainTools/_widgets.py` sits above `_core` and provides the shared Eto `SlopeInput` row widget used by all three terrain tool UIs.
 
