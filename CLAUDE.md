@@ -28,13 +28,14 @@ Available keys: `RG_Lindero`, `RG_Arriero`, `RG_Chivito`, `RG_Sebucan`, `RG_Baqu
 
 ## Running Tests
 
-The only headless-testable code is `TerrainTools/_core` (pure Python + RhinoCommon-free logic):
+Headless-testable code (pure Python, no Rhino needed):
 
 ```sh
-python TerrainTools/_core/tests/test_headless.py
+python TerrainTools/_core/tests/test_headless.py   # slope conversions, grid-prism volumes
+python AreaMeasurer/tests/test_paths.py            # Lindero layer-path contract (_paths.py)
 ```
 
-Covers slope unit conversions and grid-prism volume calculations. All other code requires a running Rhino session.
+All other code requires a running Rhino session.
 
 ## Architecture
 
@@ -60,6 +61,10 @@ The reload is intentional: it picks up live theme changes without restarting Rhi
 Single source for the neo-brutalist color palette, 8pt-grid spacing constants, and factory helpers `lbl()`, `btn()`, `hint()`, `section_header()`. All tools import this. Never hardcode colors or font sizes in a tool file.
 
 `prefs_get(key, fallback)` / `prefs_set(key, path)` persist folder memories to `_prefs.json` at the repo root.
+
+### AreaMeasurer `_paths.py` — Lindero's layer-structure contract
+
+Pure-Python module (no Rhino imports) encoding Lindero v2's hierarchy rules: parent → direct children = levels → the object's own layer = category; `_`-prefixed layers excluded with their whole subtree. Imported by `Lindero.py` with the same reload pattern as the theme. Any change to how layers are classified belongs here, with a matching case in `AreaMeasurer/tests/test_paths.py`.
 
 ### TerrainTools `_core` — the exception to the "one file" rule
 
@@ -98,6 +103,8 @@ Single source for the neo-brutalist color palette, 8pt-grid spacing constants, a
 - `super().__init__()` must be called **before** setting any property.
 - Never use keyword arguments in .NET constructors: `label = forms.Label(); label.Text = "x"` not `forms.Label(Text="x")`.
 - `TableLayout` does not support dynamic row add/remove after construction — use `StackLayout` for dynamic content.
+- Never rely on `Wrap = WrapMode.Word` for labels inside a `Scrollable`: a wrapping label reports its UNWRAPPED single-line width as preferred size and blows the scroll canvas out horizontally. Use explicit `\n` line breaks instead (see `Lindero._tab_settings`).
+- In a `DynamicLayout`, a single-control `AddRow(x)` occupies column 1 only — long text there gets squeezed to the label-column width. Long hints belong in column 2 via `AddRow(None, x)`; full-width text belongs outside the `DynamicLayout` (own `StackLayout`).
 
 ### openpyxl dependency
 

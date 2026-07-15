@@ -24,16 +24,15 @@ Tag objects with leaders built from a reusable text template, like Revit's *tag 
 
 Calculates the **footprint area** of Rhino objects — the plan area as seen from directly above (XY projection), distinct from Rhino's built-in `Area` command which sums all faces.
 
-Runs as a modeless window with six calculation scenarios:
+Runs as a modeless window with six calculation tabs:
 
-- **S1 — Selected Objects:** individual footprint per object; overlapping footprints merged with Boolean Union to avoid double-counting.
-- **S2 — By Layer:** footprints of all objects on a layer with Boolean Union to remove overlapping regions.
-- **S3 — Layer Hierarchy:** targets a parent layer whose sublayers represent floors. Overlaps removed per floor; results split into a Groups panel and an Objects panel. Grand total follows standard Gross Floor Area logic.
-- **S4 — Custom Aggregation:** user-defined key hierarchy (e.g. Domain → Main Group → Subgroup → Room Type). Footprints merged per leaf group per floor (same as S3), summed across all floors. Results displayed as a colored grid; exports to Excel.
-- **R1 — Room Analysis:** aggregates areas by a chosen key across all floors and compares totals to target values. Displayed as bullet charts with tolerance bands. Data source: S3 keys or S4 hierarchy.
-- **R2 — Group Analysis:** same as R1 but at a group/classification level.
+- **S1 — Selected Objects:** individual footprint per object; overlapping footprints merged to avoid double-counting.
+- **S2 — By Layer:** footprints of all objects on a layer, overlaps merged.
+- **S3 — Layer Hierarchy:** reads the layer tree — parent → direct children = levels (floors) → the object's own layer = category (e.g. DIN 13080 areas). Layers prefixed `_` are ignored with their whole subtree; a dry-run preview shows what counts before calculating. Union per (level, category), cross-category overlap warned per level, grand total per Gross Floor Area logic.
+- **S4 — Custom Aggregation:** user-defined hierarchy of dimensions, each either a layer-path depth or a user text key (e.g. Layer @ 1 → Layer @ 2, or Domain → Room Type). Footprints merged per leaf group per level, summed across levels.
+- **R1 / R2 — Analysis:** aggregate merged areas by category, level, or a user text key across all floors and compare against a target table (Settings). Displayed as bullet charts with tolerance bands.
 
-Accepted geometry: solids, extrusions, closed planar curves, planar surfaces, and hatches. Supports labelling via user text keys, configurable decimal places, Write Area to Objects, Excel export (S1–S4), and PNG chart export (R1–R2).
+Accepted geometry: solids, extrusions, closed planar curves, planar surfaces, and hatches. Supports labelling via user text keys, configurable decimal places, Write Area to Objects, Excel export (S1–S4, S3 as a Level × Category matrix), and PNG chart export (R1–R2).
 
 ### [Sebucan](MeshTools/WrapeMeshOnMesh/) — Wrap Mesh on Mesh
 

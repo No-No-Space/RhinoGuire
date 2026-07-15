@@ -13,7 +13,7 @@
 # Accepted geometry: solids, extrusions, closed planar curves, planar
 # surfaces, and hatches.
 # _____________________________________________________________________
-# Six scenarios:
+# Scenarios (v2 layer-structure contract — see AreaMeasurer/PLAN.md):
 #   S1 — Selected Objects:
 #        Individual footprint per object. Overlapping footprints are
 #        merged with a Boolean Union to avoid double-counting (same as S2).
@@ -22,28 +22,55 @@
 #        All objects on a layer. Overlapping footprints merged with a
 #        Boolean Union to avoid double-counting.
 #
-#   S3 — By Layer Hierarchy:
-#        Parent layer contains sublayers (each sublayer = one level/floor).
-#        Objects carry two user text keys: an object key and a group key.
-#        Overlaps removed within each sublayer.
+#   S3 — Layer Hierarchy:
+#        Parent layer → direct children = LEVELS (floors) → the object's
+#        own (lowest) layer = CATEGORY (e.g. DIN 13080 areas). Objects are
+#        collected from ALL descendant layers; layers prefixed with the
+#        ignore prefix (Settings, default "_") are excluded with their
+#        whole subtree. Union per (level, category); level total = union
+#        across the level (cross-category overlap warned); grand total =
+#        sum of level totals. Replaces the old key-based S3 and old S5.
 #
 #   S4 — Custom Aggregation:
-#        User-defined hierarchy of attribute keys (e.g. Domain → Main Group
-#        → Subgroup → Room Type). Per sublayer, footprints are merged within
-#        each leaf group (same as S3). Leaf totals are then summed across
-#        all sublayers. Results shown as an indented tree.
+#        User-defined hierarchy of dimensions; each dimension is either a
+#        'Layer @ depth N' path segment or a user text key. Footprints are
+#        merged per leaf group per level, then summed across levels.
+#        Results shown as an indented tree. The old two-key S3 = a config
+#        with two UserText dimensions.
 #
-#   R1 — Room Analysis:
-#        Aggregates individual areas by Object Key across all floors.
-#        Compares totals to a Room Target Key (set in Settings).
-#        Bullet chart per room type. Data source: S3 keys or S4 hierarchy
-#        (configurable in Settings).
-#
-#   R2 — Group Analysis:
-#        Same as R1 but aggregates by Group Key and compares to Group Target Key.
-#        Data source: S3 keys or S4 hierarchy (configurable in Settings).
+#   R1 / R2 — Analysis:
+#        One shared engine: aggregates merged areas by a chosen dimension
+#        (Category / Level / UserText key) across all levels and compares
+#        against the target table in Settings. Bullet chart per entry.
 # _____________________________________________________________________
 # Last update:
+# - [02.07.2026] - 0.8.3 Copy Window fixed on multi-monitor setups: window
+#                     rect now read from Win32 in physical pixels (ctypes,
+#                     DwmGetWindowAttribute → GetWindowRect fallback) instead
+#                     of scaling Eto's logical Bounds — logical coordinates
+#                     shift per monitor when scale factors differ
+# - [02.07.2026] - 0.8.2 Settings layout rebuilt on the proven DynamicLayout
+#                     patterns (\n-hints in column 2 — wrapping labels blow
+#                     up the Scrollable canvas width, see _tab_settings note);
+#                     Write Area works from S4 (per-object areas returned by
+#                     calc_s4); "Copy Window" button — screenshots the window
+#                     to the clipboard (DPI-aware CopyFromScreen)
+# - [02.07.2026] - 0.8.1 UI: full-width descriptions — S3/Settings text no
+#                     longer squeezed into the first layout column; false
+#                     [union failed] fixed when a group contains only
+#                     unmeasurable objects (text/annotations); settings
+#                     auto-persist per model (3dm document user text,
+#                     restored at startup, replaced when a config is loaded)
+# - [02.07.2026] - 0.8 v2 rebuild for the new layer structure: levels and
+#                     DIN 13080 categories read from the layer tree
+#                     (parent → level → … → category = object's own layer);
+#                     "_" ignore prefix with subtree cascade + dry-run
+#                     preview; footprint cache per calculation run; S5
+#                     folded into S3 (Z-banding everywhere); S4 dimensions
+#                     generalized to Layer@depth | UserText; R1/R2 targets
+#                     from Settings table; config v2 (v1 still loads);
+#                     pure path logic split into _paths.py with headless
+#                     tests (AreaMeasurer/tests/test_paths.py)
 # - [01.07.2026] - 0.7 Arrangement conservation check (regions covered by an
 #                     object must reproduce its own area, else the whole
 #                     arrangement is rejected — coincident tile edges corrupt
@@ -89,10 +116,12 @@ if _rg_root not in _sys.path:
     _sys.path.insert(0, _rg_root)
 from ui import theme as _t
 import importlib as _importlib; _importlib.reload(_t)
+from AreaMeasurer import _paths as _lp
+_importlib.reload(_lp)
 
 # Version shown in the UI. The file timestamp is added so ANY edit to this
 # file is visible in the running window — no stale-instance guessing.
-__version__ = "0.7"
+__version__ = "0.8.3"
 try:
     import datetime as _dt
     _BUILD_STAMP = _dt.datetime.fromtimestamp(
@@ -108,6 +137,10 @@ _VERSION_TEXT = f"v{__version__}  ·  file {_BUILD_STAMP}"
 
 _prefs_get = _t.prefs_get
 _prefs_set = _t.prefs_set
+
+# Per-document settings persistence: the current config (v2 dict) is stored
+# as document user text under this key — it travels inside the 3dm.
+DOC_CONFIG_KEY = "Lindero.config_v2"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -159,6 +192,59 @@ def unit_label():
         "Kilometers": "km²", "Feet": "ft²", "Inches": "in²",
     }
     return mapping.get(sc.doc.ModelUnitSystem.ToString(), "units²")
+
+
+def collect_objects(parent_layer, ignore_prefix=_lp.DEFAULT_IGNORE_PREFIX):
+    """
+    Collect measurable objects under a parent layer per the v2 contract
+    (_paths.py): level = direct child of the parent, category = the
+    object's own (lowest) layer; prefixed layers excluded with their
+    whole subtree.
+
+    Returns (records, layer_info):
+      records:    [{guid, level, category, layer}]  — guid is the raw Guid
+      layer_info: {"included": [(layer_path, level, category)],
+                   "ignored": [layer_path],
+                   "parent_direct_objects": int}
+    """
+    all_layers = rs.LayerNames() or []
+    included, ignored = _lp.partition(parent_layer, all_layers, ignore_prefix)
+    records = []
+    for layer_path, level, category in included:
+        for g in get_layer_objects(layer_path):
+            records.append({
+                "guid": g, "level": level,
+                "category": category, "layer": layer_path,
+            })
+    return records, {
+        "included": included,
+        "ignored": ignored,
+        "parent_direct_objects": len(get_layer_objects(parent_layer)),
+    }
+
+
+def preview_hierarchy(parent_layer, ignore_prefix=_lp.DEFAULT_IGNORE_PREFIX):
+    """
+    Dry run for S3: which layers count as what, with object counts —
+    NO footprint computation, so it is fast even on heavy models.
+
+    Returns {"tree": {level: {category: n_objects}}, "ignored": [path],
+             "parent_direct_objects": int, "total_objects": int}.
+    """
+    all_layers = rs.LayerNames() or []
+    included, ignored = _lp.partition(parent_layer, all_layers, ignore_prefix)
+    tree, total = {}, 0
+    for layer_path, level, category in included:
+        n = len(get_layer_objects(layer_path))
+        cats = tree.setdefault(level, {})
+        cats[category] = cats.get(category, 0) + n
+        total += n
+    return {
+        "tree": tree,
+        "ignored": ignored,
+        "parent_direct_objects": len(get_layer_objects(parent_layer)),
+        "total_objects": total,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -291,6 +377,23 @@ def get_footprint_curves(obj_guid):
         return [fallback] if fallback else []
     except Exception:
         return []
+
+
+def _fp(guid, cache):
+    """
+    Footprint curves for guid, memoized in cache.
+
+    One dict per calculation run: the same object's projection feeds the
+    per-object listing, the per-category union, AND the per-level union —
+    without the cache every union call recomputes it (S3 on levels ×
+    categories multiplies that). Pass cache=None to bypass.
+    """
+    if cache is None:
+        return get_footprint_curves(guid)
+    key = str(guid)
+    if key not in cache:
+        cache[key] = get_footprint_curves(guid)
+    return cache[key]
 
 
 def curve_area(curve):
@@ -522,10 +625,12 @@ def _pairwise_union_area(per_object_regions, tol, sliver):
     return total, True
 
 
-def combined_area(obj_guids):
+def combined_area(obj_guids, cache=None):
     """
     Total footprint area for a list of objects with overlaps removed.
     Returns (area: float, union_succeeded: bool).
+    cache: optional {str(guid): curves} memo shared across one calculation
+    run (see _fp) — the union logic itself is unchanged.
 
     Primary path (exact for overlaps, holes, and holes covered by other
     objects): Curve.CreateBooleanRegions builds the planar arrangement of
@@ -544,7 +649,7 @@ def combined_area(obj_guids):
     per_object_regions = []  # (breps or None, loops) per object, for coverage
     indiv_total = 0.0        # sum of per-object region areas (upper bound)
     for guid in obj_guids:
-        curves = get_footprint_curves(guid)
+        curves = _fp(guid, cache)
         if not curves:
             continue
         all_curves.extend(curves)
@@ -664,6 +769,67 @@ def _label(guid, key):
     return name if name else str(guid)[:8] + "…"
 
 
+def _banded_union(guids, z_height_tol, cache):
+    """
+    Overlap-merged area with Z-banding: guids are split into elevation
+    bands first (stacked floors in one group must be SUMMED, not merged),
+    then unioned per band. Returns (area, union_ok).
+
+    Bands where NO object has a calculable footprint (text, annotations,
+    points) contribute 0 and are skipped WITHOUT flagging union failure —
+    combined_area's (0.0, False) for empty input means "nothing to merge",
+    not "merge failed".
+    """
+    total, ok = 0.0, True
+    for band in _group_by_z(guids, z_height_tol):
+        if not any(_fp(g, cache) for g in band):
+            continue
+        area, band_ok = combined_area(band, cache)
+        total += area
+        if not band_ok:
+            ok = False
+    return total, ok
+
+
+# ── Aggregation dimensions (S4, R1/R2) ───────────────────────────────────────
+# A dimension is a (kind, arg) pair:
+#   (DIM_LEVEL, None)      — the record's level (direct child of the parent)
+#   (DIM_CATEGORY, None)   — the record's category (its own lowest layer)
+#   (DIM_LAYER, depth)     — layer-path segment at 1-based depth below parent
+#   (DIM_USERTEXT, key)    — user text value on the object
+
+DIM_LEVEL    = "level"
+DIM_CATEGORY = "category"
+DIM_LAYER    = "layer"
+DIM_USERTEXT = "usertext"
+
+
+def _dim_value(rec, dim, parent_layer):
+    """Value of one dimension for a collect_objects record. Missing values
+    become the placeholder '—' so groups stay comparable."""
+    kind, arg = dim
+    if kind == DIM_LEVEL:
+        return rec["level"]
+    if kind == DIM_CATEGORY:
+        return rec["category"]
+    if kind == DIM_LAYER:
+        return _lp.segment_at_depth(parent_layer, rec["layer"], int(arg))
+    val = rs.GetUserText(rec["guid"], arg) if arg else None
+    return val or _lp.PLACEHOLDER
+
+
+def _dim_label(dim):
+    """Human-readable dimension name for UI, status bar, and Excel headers."""
+    kind, arg = dim
+    if kind == DIM_LEVEL:
+        return "Level (layer)"
+    if kind == DIM_CATEGORY:
+        return "Category (layer)"
+    if kind == DIM_LAYER:
+        return f"Layer @ {int(arg)}"
+    return str(arg) if arg else _lp.PLACEHOLDER
+
+
 def calc_s1(name_key, z_height_tol=0.5):
     """
     Scenario 1 — Selected objects. Footprints merged per layer to remove
@@ -673,10 +839,11 @@ def calc_s1(name_key, z_height_tol=0.5):
     guids = rs.SelectedObjects() or []
     per_obj = []
     skipped = 0
+    cache = {}
     layer_groups = {}  # {layer_name: [guids]}
 
     for g in guids:
-        curves = get_footprint_curves(g)
+        curves = _fp(g, cache)
         if not curves:
             skipped += 1
         area = _region_area(curves)
@@ -688,13 +855,9 @@ def calc_s1(name_key, z_height_tol=0.5):
     total = 0.0
     union_ok = True
     for lname, lguids in layer_groups.items():
-        z_bands = _group_by_z(lguids, z_height_tol)
-        layer_area = 0.0
-        for band_guids in z_bands:
-            area, ok = combined_area(band_guids)
-            layer_area += area
-            if not ok:
-                union_ok = False
+        layer_area, ok = _banded_union(lguids, z_height_tol, cache)
+        if not ok:
+            union_ok = False
         layer_totals.append({"layer": lname, "area": layer_area})
         total += layer_area
 
@@ -741,104 +904,156 @@ def calc_s2(layer_name, obj_key, z_height_tol=0.5):
     guids = get_layer_objects(layer_name)
     per_obj = []
     skipped = 0
+    cache = {}
     for g in guids:
-        curves = get_footprint_curves(g)
+        curves = _fp(g, cache)
         if not curves:
             skipped += 1
         area = _region_area(curves)
         per_obj.append({"guid": str(g), "name": _label(g, obj_key), "area": area})
-    z_bands = _group_by_z(guids, z_height_tol)
-    total = 0.0
-    union_ok = True
-    for band_guids in z_bands:
-        area, ok = combined_area(band_guids)
-        total += area
-        if not ok:
-            union_ok = False
+    total, union_ok = _banded_union(guids, z_height_tol, cache)
     return {"objects": per_obj, "total": total, "union_ok": union_ok, "skipped": skipped}
 
 
-def calc_s3(parent_layer, obj_key, grp_key):
+def calc_s3(parent_layer, obj_key, ignore_prefix=_lp.DEFAULT_IGNORE_PREFIX,
+            z_height_tol=0.5):
     """
-    Scenario 3 — Sublayer hierarchy. Overlaps removed per sublayer.
-    Returns {sublayers: {name: {objects, group_totals, total, union_ok}}, overall_total}.
-    """
-    result = {"sublayers": {}, "overall_total": 0.0}
-    for sl in get_child_layers(parent_layer):
-        guids = get_layer_objects(sl)
-        if not guids:
-            result["sublayers"][sl] = {
-                "objects": [], "group_totals": {}, "total": 0.0, "union_ok": True
-            }
-            continue
+    Scenario 3 — Layer Hierarchy (v2). Levels and categories come from the
+    layer tree itself (see _paths.py); objects are collected from ALL
+    non-ignored descendant layers of the parent.
 
-        objects = []
-        groups = {}
-        skipped = 0
-        for guid in guids:
-            curves = get_footprint_curves(guid)
+    Per level:
+      category_totals — union per (level, category), Z-banded
+      total           — union across ALL the level's objects, Z-banded;
+                        Σ(category_totals) − total = cross-category overlap
+    overall_total    = Σ level totals (floors are additive — GFA logic)
+    category_overall = per category, Σ of its per-level unions
+
+    Returns {levels: {name: {objects, category_totals, total, union_ok,
+                             skipped, warnings}},
+             overall_total, category_overall, layer_info, warnings}.
+    Level order follows _lp.level_sort_key (top floor first).
+    """
+    records, info = collect_objects(parent_layer, ignore_prefix)
+    cache = {}
+    result = {
+        "levels": {},
+        "overall_total": 0.0,
+        "category_overall": {},
+        "layer_info": info,
+        "warnings": [],
+    }
+
+    by_level = {}
+    for r in records:
+        by_level.setdefault(r["level"], []).append(r)
+
+    for level in sorted(by_level, key=_lp.level_sort_key):
+        recs = by_level[level]
+        objects, cat_groups = [], {}
+        skipped = direct_on_level = 0
+        for r in recs:
+            curves = _fp(r["guid"], cache)
             if not curves:
                 skipped += 1
-            grp_val = (rs.GetUserText(guid, grp_key) if grp_key else None) or "—"
+            if r["category"] == _lp.PLACEHOLDER:
+                direct_on_level += 1
             objects.append({
-                "guid": str(guid),
-                "name": _label(guid, obj_key),
-                "group": grp_val,
+                "guid": str(r["guid"]),
+                "name": _label(r["guid"], obj_key),
+                "category": r["category"],
                 "area": _region_area(curves),
             })
-            groups.setdefault(grp_val, []).append(guid)
+            cat_groups.setdefault(r["category"], []).append(r["guid"])
 
-        total, union_ok = combined_area(guids)
-        group_totals = {gv: combined_area(gguids)[0] for gv, gguids in groups.items()}
+        total, union_ok = _banded_union(
+            [r["guid"] for r in recs], z_height_tol, cache)
 
-        result["sublayers"][sl] = {
+        category_totals = {}
+        for cat, cat_guids in cat_groups.items():
+            area, cat_ok = _banded_union(cat_guids, z_height_tol, cache)
+            category_totals[cat] = area
+            if not cat_ok:
+                union_ok = False
+            result["category_overall"][cat] = (
+                result["category_overall"].get(cat, 0.0) + area)
+
+        warnings = []
+        cross = sum(category_totals.values()) - total
+        if cross > 1e-6:
+            warnings.append(
+                f"Cross-category overlap: {cross:,.4f} — "
+                "categories share footprint area on this level")
+        if direct_on_level:
+            warnings.append(
+                f"{direct_on_level} object(s) directly on the level layer "
+                f"(category '{_lp.PLACEHOLDER}')")
+
+        result["levels"][level] = {
             "objects": objects,
-            "group_totals": group_totals,
+            "category_totals": category_totals,
             "total": total,
             "union_ok": union_ok,
             "skipped": skipped,
+            "warnings": warnings,
         }
         result["overall_total"] += total
 
+    if info["parent_direct_objects"]:
+        result["warnings"].append(
+            f"[!] {info['parent_direct_objects']} object(s) directly on the "
+            "parent layer are not measured")
+    if not records:
+        result["warnings"].append(
+            "[!] No measurable objects found — check the parent layer, "
+            f"the ignore prefix ('{ignore_prefix}'), and the layer structure.")
     return result
 
 
-def calc_s4(parent_layer, key_sequence):
+def calc_s4(parent_layer, dims, ignore_prefix=_lp.DEFAULT_IGNORE_PREFIX,
+            z_height_tol=0.5):
     """
-    Scenario 4 — Custom Aggregation.
-    key_sequence: ordered list of user text key names.
-    Per sublayer, objects are grouped by their full key-value path tuple.
-    Footprints within each leaf group are merged (Boolean Union) per sublayer,
-    matching S3 overlap handling. Leaf totals are then summed across sublayers.
-    Returns {tree, overall_total, warnings}.
+    Scenario 4 — Custom Aggregation (v2).
+    dims: ordered list of (kind, arg) dimensions — see _dim_value(). Each
+    entry is either (DIM_LAYER, depth) or (DIM_USERTEXT, key), so the old
+    two-key S3 and the new layer hierarchy are both configs of this.
 
-    tree: nested dict  {value_str: {"area": float, "children": {...}}}
-    Each node's "area" = cumulative sum of all descendant leaf areas.
+    Objects come from collect_objects (whole subtree, ignore prefix).
+    Per LEVEL, objects are grouped by their full dimension-value path;
+    footprints within each leaf group are merged (Z-banded union) per
+    level, then leaf totals are summed across levels.
+
+    Returns {tree, overall_total, warnings, layer_info}.
+    tree: nested dict {value_str: {"area": float, "children": {...}}} —
+    each node's area = cumulative sum of all descendant leaf areas.
     """
-    if not key_sequence:
-        return {"tree": {}, "overall_total": 0.0, "warnings": ["[!] No keys defined."]}
+    if not dims:
+        return {"tree": {}, "overall_total": 0.0,
+                "warnings": ["[!] No dimensions defined."], "layer_info": None}
 
-    # flat_buckets[path_tuple] = cumulative area across all floors
+    records, info = collect_objects(parent_layer, ignore_prefix)
+    cache = {}
+
+    # Per-object individual areas — feeds "Write Area to Objects" on the S4
+    # tab. The cache makes this free: the same projections are reused by the
+    # unions below.
+    objects = [
+        {"guid": str(r["guid"]), "area": _region_area(_fp(r["guid"], cache))}
+        for r in records
+    ]
+
+    # Group per (level, full dimension path) — the level keeps the union
+    # boundary at one floor, exactly like S3.
+    level_path_groups = {}
+    for r in records:
+        path = tuple(_dim_value(r, d, parent_layer) for d in dims)
+        level_path_groups.setdefault((r["level"], path), []).append(r["guid"])
+
+    # flat_buckets[path_tuple] = cumulative area across all levels
     flat_buckets = {}
-
-    for sl in get_child_layers(parent_layer):
-        guids = get_layer_objects(sl)
-        if not guids:
-            continue
-
-        # Group objects by their full key path
-        path_groups = {}
-        for guid in guids:
-            path = tuple(
-                (rs.GetUserText(guid, k) if k else None) or "—"
-                for k in key_sequence
-            )
-            path_groups.setdefault(path, []).append(guid)
-
-        # Per leaf group in this floor: merged footprint (Boolean Union)
-        for path, path_guids in path_groups.items():
-            area, _ = combined_area(path_guids)
-            flat_buckets[path] = flat_buckets.get(path, 0.0) + area
+    for (_level, path), path_guids in level_path_groups.items():
+        area, _ok = _banded_union(path_guids, z_height_tol, cache)
+        flat_buckets[path] = flat_buckets.get(path, 0.0) + area
 
     # Build nested tree — each ancestor accumulates all descendant leaf areas
     tree = {}
@@ -855,386 +1070,60 @@ def calc_s4(parent_layer, key_sequence):
 
     warnings = []
     if not flat_buckets:
-        warnings.append("[!] No objects found in any sublayer.")
+        warnings.append("[!] No measurable objects found under the parent "
+                        f"(ignore prefix '{ignore_prefix}').")
 
-    return {"tree": tree, "overall_total": overall_total, "warnings": warnings}
+    return {"tree": tree, "overall_total": overall_total,
+            "warnings": warnings, "layer_info": info, "objects": objects}
 
 
-def calc_s5(parent_layer, obj_key, z_height_tol):
+def calc_r(parent_layer, dim, targets, ignore_prefix=_lp.DEFAULT_IGNORE_PREFIX,
+           z_height_tol=0.5):
     """
-    Scenario 5 — Group Hierarchy.
-    Each sublayer is a group; objects at different heights within the group are
-    split into Z-elevation bands (z_height_tol), unioned per band, then summed.
-    Returns {sublayers: {name: {objects, z_totals, total, union_ok, skipped}}, overall_total}.
-    """
-    result = {"sublayers": {}, "overall_total": 0.0}
-    for sl in get_child_layers(parent_layer):
-        guids = get_layer_objects(sl)
-        if not guids:
-            result["sublayers"][sl] = {
-                "objects": [], "z_totals": [], "total": 0.0, "union_ok": True, "skipped": 0
-            }
-            continue
+    R1 / R2 shared engine (v2).
+    Aggregates merged footprint areas by ONE dimension (see _dim_value)
+    across all levels: per level, footprints within each dimension-value
+    group are merged (Z-banded union) to remove same-group overlaps, then
+    the merged areas are summed across levels.
 
-        objects = []
-        skipped = 0
-        for guid in guids:
-            curves = get_footprint_curves(guid)
-            if not curves:
-                skipped += 1
-            objects.append({
-                "guid": str(guid),
-                "name": _label(guid, obj_key),
-                "area": _region_area(curves),
-            })
+    targets: {label: float} from the Settings target table. Labels without
+    a target chart as "(no target)" and produce a warning.
 
-        z_bands = _group_by_z(guids, z_height_tol)
-        total = 0.0
-        union_ok = True
-        z_totals = []
-        for band_guids in z_bands:
-            band_z = get_object_bottom_z(band_guids[0])
-            area, ok = combined_area(band_guids)
-            z_totals.append({"z": band_z if band_z is not None else 0.0, "area": area})
-            total += area
-            if not ok:
-                union_ok = False
-
-        result["sublayers"][sl] = {
-            "objects": objects,
-            "z_totals": z_totals,
-            "total": total,
-            "union_ok": union_ok,
-            "skipped": skipped,
-        }
-        result["overall_total"] += total
-
-    return result
-
-
-def calc_r1(parent_layer, obj_key, room_target_key):
-    """
-    R1 — Room Analysis.
-    Per floor, merges footprints within each obj_key group (Boolean Union) to
-    remove same-key overlaps, then sums merged areas across all floors.
-    Compares each group total to room_target_key.
     Returns {entries: [{label, measured, goal}], warnings: [str]}.
     """
-    area_by_key = {}   # {nv: cumulative merged area across floors}
-    all_guids   = {}   # {nv: [all guids]} — for target-key lookup only
+    records, _info = collect_objects(parent_layer, ignore_prefix)
+    cache = {}
 
-    for sl in get_child_layers(parent_layer):
-        floor_groups = {}
-        for guid in (get_layer_objects(sl) or []):
-            nv = (rs.GetUserText(guid, obj_key) if obj_key else None)
-            if not nv:
-                nv = rs.ObjectName(guid) or (str(guid)[:8] + "…")
-            floor_groups.setdefault(nv, []).append(guid)
-            all_guids.setdefault(nv, []).append(guid)
+    level_groups = {}
+    for r in records:
+        v = _dim_value(r, dim, parent_layer)
+        level_groups.setdefault((r["level"], v), []).append(r["guid"])
 
-        for nv, guids in floor_groups.items():
-            area, _ = combined_area(guids)
-            area_by_key[nv] = area_by_key.get(nv, 0.0) + area
+    area_by_val = {}
+    for (_level, v), guids in level_groups.items():
+        area, _ok = _banded_union(guids, z_height_tol, cache)
+        area_by_val[v] = area_by_val.get(v, 0.0) + area
 
     entries, warnings = [], []
-    for nv in sorted(area_by_key):
-        goal = None
-        if room_target_key:
-            for guid in all_guids.get(nv, []):
-                raw = rs.GetUserText(guid, room_target_key)
-                if raw:
-                    try:
-                        goal = float(raw)
-                        break
-                    except (ValueError, TypeError):
-                        pass
-            if goal is None:
-                warnings.append(f"[!] Room Target Key '{room_target_key}' not found on '{nv}'")
-        entries.append({"label": nv, "measured": area_by_key[nv], "goal": goal})
-
-    return {"entries": entries, "warnings": warnings}
-
-
-def calc_r2(parent_layer, grp_key, grp_target_key):
-    """
-    R2 — Group Analysis.
-    Per floor, merges footprints within each grp_key group (Boolean Union) to
-    remove same-key overlaps, then sums merged areas across all floors.
-    Compares each group total to grp_target_key.
-    Returns {entries: [{label, measured, goal}], warnings: [str]}.
-    """
-    area_by_key = {}   # {nv: cumulative merged area across floors}
-    all_guids   = {}   # {nv: [all guids]} — for target-key lookup only
-
-    for sl in get_child_layers(parent_layer):
-        floor_groups = {}
-        for guid in (get_layer_objects(sl) or []):
-            nv = (rs.GetUserText(guid, grp_key) if grp_key else None) or "—"
-            floor_groups.setdefault(nv, []).append(guid)
-            all_guids.setdefault(nv, []).append(guid)
-
-        for nv, guids in floor_groups.items():
-            area, _ = combined_area(guids)
-            area_by_key[nv] = area_by_key.get(nv, 0.0) + area
-
-    entries, warnings = [], []
-    for nv in sorted(area_by_key):
-        goal = None
-        if grp_target_key:
-            for guid in all_guids.get(nv, []):
-                raw = rs.GetUserText(guid, grp_target_key)
-                if raw:
-                    try:
-                        goal = float(raw)
-                        break
-                    except (ValueError, TypeError):
-                        pass
-            if goal is None:
-                warnings.append(f"[!] Group Target Key '{grp_target_key}' not found on '{nv}'")
-        entries.append({"label": nv, "measured": area_by_key[nv], "goal": goal})
+    targets = targets or {}
+    for v in sorted(area_by_val):
+        goal = targets.get(v)
+        if goal is None:
+            warnings.append(f"[!] No target set for '{v}' (Settings → Target Areas)")
+        entries.append({"label": v, "measured": area_by_val[v], "goal": goal})
 
     return {"entries": entries, "warnings": warnings}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Results formatting (monospace text for the TextArea)
+# Number formatting (results grids + status bar)
 # ══════════════════════════════════════════════════════════════════════════════
 
-W = 62  # result panel width in characters
-_DECIMALS = 2  # decimal places — updated from Settings before each format call
-
-
-def _rule(char="═"):
-    return char * W
-
-
-def _row(left, right="", lw=38):
-    return f"  {left:<{lw}}{right:>{W - lw - 2}}"
+_DECIMALS = 2  # decimal places — updated from Settings before each calculation
 
 
 def _fmt(v):
     return f"{v:,.{_DECIMALS}f}"
-
-
-def format_s1(data, unit):
-    if not data["objects"]:
-        return "  No objects selected.\n"
-    raw_sum = sum(o["area"] for o in data["objects"])
-    union_note = "" if data["union_ok"] else "  [union failed — sum shown]"
-    layer_totals = data.get("layer_totals") or []
-    multi_layer = len(layer_totals) > 1
-    total_label = "TOTAL (per-layer merged)" if multi_layer else "TOTAL (footprint, overlaps merged)"
-    lines = [
-        _rule(),
-        f"  SCENARIO 1 — SELECTED OBJECTS   [{unit}]",
-        _rule("─"),
-        _row("Object", "Area"),
-        _rule("─"),
-    ]
-    for o in data["objects"]:
-        lines.append(_row(o["name"][:36], _fmt(o["area"])))
-    lines += [
-        _rule("─"),
-        _row("Sum (individual totals)", _fmt(raw_sum)),
-    ]
-    if multi_layer:
-        for lt in layer_totals:
-            lines.append(_row(f"  {short_name(lt['layer'])}", _fmt(lt["area"])))
-    overlap = raw_sum - data["total"]
-    lines.append(_row(f"{total_label}{union_note}", _fmt(data["total"])))
-    if overlap > 1e-6 and not multi_layer:
-        lines += [
-            _rule("─"),
-            _row("  [!] Overlapping area (sum - total)", _fmt(overlap)),
-            "      Some objects share footprint area.",
-            "      Verify whether double-counting is intentional.",
-        ]
-    z_warning = data.get("z_warning")
-    if z_warning:
-        lines += [
-            _rule("─"),
-            f"  [!] {z_warning}",
-        ]
-    if data.get("skipped", 0) > 0:
-        lines += [
-            _rule("─"),
-            f"  [!] {data['skipped']} object(s) had no calculable footprint",
-            "      and were skipped (e.g. points, text, annotations).",
-        ]
-    lines += [_rule(), ""]
-    return "\n".join(lines)
-
-
-def format_s2(data, layer_name, obj_key, unit):
-    if not data["objects"]:
-        return f"  No objects found on layer '{layer_name}'.\n"
-    raw_sum = sum(o["area"] for o in data["objects"])
-    union_note = "" if data["union_ok"] else "  [union failed — sum shown]"
-    lines = [
-        _rule(),
-        f"  SCENARIO 2 — BY LAYER   [{unit}]",
-        f"  Layer : {layer_name}",
-        f"  Key   : {obj_key or '(object name / GUID)'}",
-        _rule("─"),
-        _row("Object", "Area"),
-        _rule("─"),
-    ]
-    for o in data["objects"]:
-        lines.append(_row(o["name"][:36], _fmt(o["area"])))
-    overlap = raw_sum - data["total"]
-    lines += [
-        _rule("─"),
-        _row("Sum (individual totals)", _fmt(raw_sum)),
-        _row(f"TOTAL (footprint, overlaps merged){union_note}", _fmt(data["total"])),
-    ]
-    if overlap > 1e-6:
-        lines += [
-            _rule("─"),
-            _row("  [!] Overlapping area (sum - total)", _fmt(overlap)),
-            "      Some objects share footprint area.",
-            "      Verify whether double-counting is intentional.",
-        ]
-    if data.get("skipped", 0) > 0:
-        lines += [
-            _rule("─"),
-            f"  [!] {data['skipped']} object(s) had no calculable footprint",
-            "      and were skipped (e.g. points, text, annotations).",
-        ]
-    lines += [_rule(), ""]
-    return "\n".join(lines)
-
-
-def format_s3_groups(data, parent_layer, grp_key, unit):
-    """Group summary panel for S3: per-floor group totals + overall total."""
-    if not data["sublayers"]:
-        return f"  No sublayers found under '{parent_layer}'.\n"
-    lines = [
-        _rule(),
-        f"  SCENARIO 3 — GROUPS   [{unit}]",
-        f"  Parent    : {parent_layer}",
-        f"  Group key : {grp_key or '—'}",
-        _rule("═"),
-        "",
-    ]
-    for sl, sl_data in data["sublayers"].items():
-        sn = short_name(sl)
-        union_note = "" if sl_data["union_ok"] else "  [union failed]"
-        lines += [
-            f"  ▸ {sn}   —   Total: {_fmt(sl_data['total'])} {unit}{union_note}",
-            _rule("─"),
-        ]
-        if sl_data["group_totals"] and grp_key:
-            lines.append(_row("Group (combined footprint)", "Area"))
-            lines.append("  " + "·" * (W - 2))
-            for gv, ga in sorted(sl_data["group_totals"].items()):
-                lines.append(_row(f"  {gv}"[:36], _fmt(ga)))
-            group_sum = sum(sl_data["group_totals"].values())
-            cross_group = group_sum - sl_data["total"]
-            if cross_group > 1e-6:
-                lines += [
-                    _rule("─"),
-                    _row("  [!] Cross-group overlap", _fmt(cross_group)),
-                    "      Groups share footprint area across boundaries.",
-                ]
-        else:
-            lines.append("  (no group key set)")
-        lines.append("")
-    lines += [
-        _rule("═"),
-        _row("OVERALL TOTAL (sum of all levels)", _fmt(data["overall_total"])),
-        _rule(),
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def format_s3_objects(data, parent_layer, obj_key, grp_key, unit):
-    """Object detail panel for S3: per-floor individual object list."""
-    if not data["sublayers"]:
-        return f"  No sublayers found under '{parent_layer}'.\n"
-    lines = [
-        _rule(),
-        f"  SCENARIO 3 — OBJECTS   [{unit}]",
-        f"  Parent     : {parent_layer}",
-        f"  Object key : {obj_key or '(object name / GUID)'}",
-        _rule("═"),
-        "",
-    ]
-    for sl, sl_data in data["sublayers"].items():
-        sn = short_name(sl)
-        lines += [f"  ▸ {sn}", _rule("─")]
-        if sl_data["objects"]:
-            if grp_key:
-                n_w, g_w, a_w = 26, 20, W - 26 - 20 - 4
-                lines.append(f"  {'Object':<{n_w}}{'Group':<{g_w}}{'Area':>{a_w}}")
-                lines.append("  " + "·" * (W - 2))
-                for o in sl_data["objects"]:
-                    lines.append(
-                        f"  {o['name'][:n_w-1]:<{n_w}}"
-                        f"{o['group'][:g_w-1]:<{g_w}}"
-                        f"{_fmt(o['area']):>{a_w}}"
-                    )
-            else:
-                lines.append(_row("Object", "Area"))
-                lines.append("  " + "·" * (W - 2))
-                for o in sl_data["objects"]:
-                    lines.append(_row(o["name"][:36], _fmt(o["area"])))
-        else:
-            lines.append("  (no objects)")
-        individual_sum = sum(o["area"] for o in sl_data["objects"])
-        total_overlap = individual_sum - sl_data["total"]
-        if total_overlap > 1e-6:
-            lines += [
-                _rule("─"),
-                _row("  [!] Overlapping area (sum - total)", _fmt(total_overlap)),
-                "      Some objects share footprint area.",
-                "      Verify whether double-counting is intentional.",
-            ]
-        if sl_data.get("skipped", 0) > 0:
-            lines += [
-                _rule("─"),
-                f"  [!] {sl_data['skipped']} object(s) had no calculable footprint",
-                "      and were skipped (e.g. points, text, annotations).",
-            ]
-        lines.append("")
-    lines += [_rule(), ""]
-    return "\n".join(lines)
-
-
-def format_s4(data, parent_layer, key_sequence, unit):
-    """Format the S4 custom aggregation tree as indented monospace text."""
-    if not data["tree"]:
-        return f"  No data found under '{parent_layer}'.\n"
-
-    key_path_str = " > ".join(key_sequence) if key_sequence else "—"
-    lines = [
-        _rule(),
-        f"  SCENARIO 4 — CUSTOM AGGREGATION   [{unit}]",
-        f"  Parent : {parent_layer}",
-        f"  Keys   : {key_path_str}",
-        _rule("─"),
-    ]
-
-    def walk(node, level):
-        for val in sorted(node):
-            entry = node[val]
-            indent = "    " * level
-            if entry["children"]:
-                label = f"  {indent}▸ {val}"
-            else:
-                label = f"  {indent}  {val}"
-            lines.append(_row(label[:38], _fmt(entry["area"])))
-            if entry["children"]:
-                walk(entry["children"], level + 1)
-
-    walk(data["tree"], 0)
-
-    lines += [_rule("─"), _row("OVERALL TOTAL", _fmt(data["overall_total"])), _rule(), ""]
-
-    if data.get("warnings"):
-        lines.insert(-1, "\n".join(f"  {w}" for w in data["warnings"]))
-
-    return "\n".join(lines)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1380,18 +1269,19 @@ class LinderoForm(forms.Form):
         self._export_data = None
         self._last_s1 = None   # list of {guid, name, area}
         self._last_s2 = None   # {objects, total, union_ok}
-        self._last_s3 = None   # {sublayers, overall_total}
-        self._last_s4 = None   # {tree, overall_total, warnings}
-        self._last_s5 = None   # {sublayers, overall_total}
+        self._last_s3 = None   # calc_s3 result (levels, category_overall, …)
+        self._last_s4 = None   # calc_s4 result (tree, overall_total, …)
 
         # Search-filter updater functions for key ComboBoxes (populated by tab builders)
         self._ks_combos = []   # [updater, ...] for static key combos
         self._ks_write  = None # updater for _write_key_combo (has extra "Area" item)
-        self._ks_s4     = {}   # {cb: updater} for dynamic S4 rows
+        self._ks_s4     = {}   # {id(cb): updater} for dynamic S4 usertext rows
         self._ks_layer_s2     = None   # layer search updaters — set by tab builders
         self._ks_layer_parent = None
         self._ks_layer_s4_par = None
-        self._ks_layer_s5_par = None
+
+        # Settings target table rows (dynamic)
+        self._target_rows = []  # [{"label_tb", "value_tb", "row"}]
 
         # R1 / R2 chart state
         self._r1_entries = []
@@ -1402,6 +1292,12 @@ class LinderoForm(forms.Form):
         self._r2_unit    = ""
 
         self._build_ui()
+
+        # Per-document persistence: restore the settings stored in the 3dm
+        # and write them back when the window closes (see _store_doc_config).
+        self.Closed += self.on_form_closed
+        if self._load_doc_config():
+            self.status_label.Text += "   ·   settings restored from document"
 
     # ------------------------------------------------------------------
     # Layout builders
@@ -1419,7 +1315,6 @@ class LinderoForm(forms.Form):
         self.tabs.Pages.Add(self._tab_s2())
         self.tabs.Pages.Add(self._tab_s3())
         self.tabs.Pages.Add(self._tab_s4())
-        self.tabs.Pages.Add(self._tab_s5())
         self.tabs.Pages.Add(self._tab_r1())
         self.tabs.Pages.Add(self._tab_r2())
         self.tabs.Pages.Add(self._tab_settings())
@@ -1466,12 +1361,20 @@ class LinderoForm(forms.Form):
         png_btn.BackgroundColor = _t.BTN_DEFAULT
         png_btn.Click += self.on_export_png
 
+        copy_btn = forms.Button()
+        copy_btn.Text = "Copy Window"
+        copy_btn.Font = _t.F_SANS_B
+        copy_btn.BackgroundColor = _t.BTN_DEFAULT
+        copy_btn.ToolTip = "Screenshot this window to the clipboard (paste with Ctrl+V)"
+        copy_btn.Click += self.on_copy_window
+
         btn_row.Items.Add(forms.StackLayoutItem(calc_btn))
         btn_row.Items.Add(forms.StackLayoutItem(clear_btn))
         btn_row.Items.Add(forms.StackLayoutItem(refresh_btn))
         btn_row.Items.Add(forms.StackLayoutItem(export_btn))
         btn_row.Items.Add(forms.StackLayoutItem(write_btn))
         btn_row.Items.Add(forms.StackLayoutItem(png_btn))
+        btn_row.Items.Add(forms.StackLayoutItem(copy_btn))
         outer.Items.Add(forms.StackLayoutItem(btn_row))
 
         # Write panel (hidden until toggled)
@@ -1626,21 +1529,34 @@ class LinderoForm(forms.Form):
         page = forms.TabPage()
         page.Text = "S3 — Layer Hierarchy"
 
+        # Full-width description block — kept OUT of the DynamicLayout:
+        # a single-control AddRow sits in column 1, whose width is set by
+        # the "Parent Layer:" label, so long text wraps into a tall sliver.
+        head = forms.StackLayout()
+        head.Orientation = forms.Orientation.Vertical
+        head.Spacing = 4
+        head.Padding = drawing.Padding(8, 8, 8, 0)
+        head.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+
+        desc = forms.Label()
+        desc.Text = (
+            "Levels and categories come from the layer tree — objects are "
+            "collected from every non-ignored layer under the parent."
+        )
+        desc.TextColor = _t.TEXT_MUTED
+        desc.Wrap = forms.WrapMode.Word
+        head.Items.Add(forms.StackLayoutItem(desc))
+
+        sub3 = forms.Label()
+        sub3.Text = "Level = direct child of parent   ·   Category = object's own layer"
+        sub3.Font = _t.F_SANS_B
+        sub3.TextColor = _t.HEADER
+        sub3.Wrap = forms.WrapMode.Word
+        head.Items.Add(forms.StackLayoutItem(sub3))
+
         controls = forms.DynamicLayout()
         controls.DefaultSpacing = drawing.Size(5, 6)
         controls.Padding = drawing.Padding(8)
-
-        desc = forms.Label()
-        desc.Text = "Parent layer + sublayers (each sublayer = one level / floor)."
-        desc.TextColor = _t.TEXT_MUTED
-        controls.AddRow(desc)
-
-        sub3 = forms.Label()
-        sub3.Text = "Sublayer = Floor"
-        sub3.Font = _t.F_SANS_B
-        sub3.TextColor = _t.HEADER
-        controls.AddRow(sub3)
-        controls.AddRow(None)
 
         parent_lbl = forms.Label()
         parent_lbl.Text = "Parent Layer:"
@@ -1650,51 +1566,59 @@ class LinderoForm(forms.Form):
         self.parent_layer_dd.Width = 300
         self._ks_layer_parent = _t.bind_key_search(self.parent_layer_dd, self.available_layers)
         controls.AddRow(parent_lbl, self.parent_layer_dd)
-        controls.AddRow(None)
-
-        grp_key_lbl = forms.Label()
-        grp_key_lbl.Text = "Group Key:"
-        self.grp_key_s3 = forms.ComboBox()
-        self.grp_key_s3.DataStore = self.available_keys
-        self.grp_key_s3.PlaceholderText = "Department / class (larger grouping)"
-        self.grp_key_s3.Width = 300
-        self._ks_combos.append(_t.bind_key_search(self.grp_key_s3, self.available_keys))
-        grp_key_hint = forms.Label()
-        grp_key_hint.Text = "Larger class grouping (e.g. 'Department')"
-        grp_key_hint.TextColor = _t.TEXT_MUTED
-        controls.AddRow(grp_key_lbl, self.grp_key_s3)
-        controls.AddRow(None, grp_key_hint)
-        controls.AddRow(None)
 
         obj_key_lbl = forms.Label()
         obj_key_lbl.Text = "Object Key:"
         self.obj_key_s3 = forms.ComboBox()
         self.obj_key_s3.DataStore = self.available_keys
-        self.obj_key_s3.PlaceholderText = "Individual / small group name"
+        self.obj_key_s3.PlaceholderText = "Optional — object labels only"
         self.obj_key_s3.Width = 300
         self._ks_combos.append(_t.bind_key_search(self.obj_key_s3, self.available_keys))
         obj_key_hint = forms.Label()
-        obj_key_hint.Text = "Individual or small group name (e.g. 'Room Name')"
+        obj_key_hint.Text = "User text key used to label objects in the detail list"
         obj_key_hint.TextColor = _t.TEXT_MUTED
         controls.AddRow(obj_key_lbl, self.obj_key_s3)
         controls.AddRow(None, obj_key_hint)
 
+        # Preview row — own horizontal stack so the button keeps its natural
+        # width and the hint wraps in the remaining space.
+        prev_row = forms.StackLayout()
+        prev_row.Orientation = forms.Orientation.Horizontal
+        prev_row.Spacing = 8
+        prev_row.Padding = drawing.Padding(8, 0, 8, 4)
+        prev_row.VerticalContentAlignment = forms.VerticalAlignment.Center
+
+        preview_btn = forms.Button()
+        preview_btn.Text = "Preview Structure"
+        preview_btn.Font = _t.F_SANS_B
+        preview_btn.BackgroundColor = _t.BTN_DEFAULT
+        preview_btn.Click += self.on_preview_s3
+        preview_hint = forms.Label()
+        preview_hint.Text = (
+            "Dry run: included levels/categories with object counts, plus "
+            "ignored layers (prefix in Settings, default '_') — no areas computed."
+        )
+        preview_hint.TextColor = _t.TEXT_MUTED
+        preview_hint.Wrap = forms.WrapMode.Word
+        prev_row.Items.Add(forms.StackLayoutItem(preview_btn))
+        prev_row.Items.Add(forms.StackLayoutItem(preview_hint, True))
+
         # ── Two-panel split results ─────────────────────────────────────
-        grp_hdr = forms.Label()
-        grp_hdr.Text = "Groups — Combined Footprint"
-        grp_hdr.Font = _t.F_HEAD
-        # groups grid: floor name (expand) + area (fixed)
-        self.results_s3_groups_grid = self._make_results_grid([(True, 0), (False, 110)])
-        grp_pane = forms.StackLayout()
-        grp_pane.Orientation = forms.Orientation.Vertical
-        grp_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
-        grp_pane.Items.Add(forms.StackLayoutItem(grp_hdr))
-        grp_pane.Items.Add(forms.StackLayoutItem(self.results_s3_groups_grid, True))
+        brk_hdr = forms.Label()
+        brk_hdr.Text = "Breakdown — Level × Category"
+        brk_hdr.Font = _t.F_HEAD
+        # breakdown grid: label (expand) + area (fixed)
+        self.results_s3_breakdown_grid = self._make_results_grid([(True, 0), (False, 110)])
+        brk_pane = forms.StackLayout()
+        brk_pane.Orientation = forms.Orientation.Vertical
+        brk_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        brk_pane.Items.Add(forms.StackLayoutItem(brk_hdr))
+        brk_pane.Items.Add(forms.StackLayoutItem(self.results_s3_breakdown_grid, True))
 
         obj_hdr = forms.Label()
         obj_hdr.Text = "Objects — Detail"
         obj_hdr.Font = _t.F_HEAD
-        # objects grid: object name (expand) + group (fixed) + area (fixed)
+        # objects grid: object name (expand) + category (fixed) + area (fixed)
         self.results_s3_objects_grid = self._make_results_grid([(True, 0), (False, 120), (False, 90)])
         obj_pane = forms.StackLayout()
         obj_pane.Orientation = forms.Orientation.Vertical
@@ -1704,14 +1628,16 @@ class LinderoForm(forms.Form):
 
         splitter = forms.Splitter()
         splitter.Orientation = forms.Orientation.Vertical
-        splitter.Panel1 = grp_pane
+        splitter.Panel1 = brk_pane
         splitter.Panel2 = obj_pane
         splitter.Position = 220
 
         layout = forms.StackLayout()
         layout.Orientation = forms.Orientation.Vertical
         layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
+        layout.Items.Add(forms.StackLayoutItem(head))
         layout.Items.Add(forms.StackLayoutItem(controls))
+        layout.Items.Add(forms.StackLayoutItem(prev_row))
         layout.Items.Add(forms.StackLayoutItem(splitter, True))
 
         page.Content = layout
@@ -1733,9 +1659,11 @@ class LinderoForm(forms.Form):
 
         desc = forms.Label()
         desc.Text = (
-            "Groups objects by a user-defined hierarchy of attribute keys. "
-            "Footprints are merged per leaf group per floor (same as S3), "
-            "then summed across all floors of the chosen parent layer."
+            "Groups objects by a user-defined hierarchy of dimensions — each "
+            "one is either a layer-path segment ('Layer @ depth', 1 = level) "
+            "or a user text key. Footprints are merged per leaf group per "
+            "level (same as S3), then summed across all levels. Ignore "
+            "prefix from Settings applies."
         )
         desc.TextColor = _t.TEXT_MUTED
         desc.Wrap = forms.WrapMode.Word
@@ -1755,26 +1683,29 @@ class LinderoForm(forms.Form):
         pl_row.AddRow(pl_lbl, self.parent_layer_s4_dd)
         layout.Items.Add(forms.StackLayoutItem(pl_row))
 
-        # Keys section header + Add button
+        # Dimensions section header + Add button
         keys_header = forms.StackLayout()
         keys_header.Orientation = forms.Orientation.Horizontal
         keys_header.Spacing = 10
         keys_header.Padding = drawing.Padding(0, 2, 0, 2)
         keys_lbl = forms.Label()
-        keys_lbl.Text = "Attribute Keys  (top row = level 1, bottom = deepest):"
+        keys_lbl.Text = "Dimensions  (top row = hierarchy level 1, bottom = deepest):"
         add_btn = forms.Button()
-        add_btn.Text = "+ Add Level"
-        add_btn.Click += self._on_s4_add_key
+        add_btn.Text = "+ Add Dimension"
+        add_btn.Click += self._on_s4_add_dim
         keys_header.Items.Add(forms.StackLayoutItem(keys_lbl))
         keys_header.Items.Add(forms.StackLayoutItem(add_btn))
         layout.Items.Add(forms.StackLayoutItem(keys_header))
 
-        # Dynamic key rows container
+        # Dynamic dimension rows container.
+        # Default seed = Layer @ 1 → Layer @ 2 (Level → Category — matches
+        # the v2 layer contract out of the box).
         self._s4_keys_layout = forms.StackLayout()
         self._s4_keys_layout.Orientation = forms.Orientation.Vertical
         self._s4_keys_layout.Spacing = 3
-        self._s4_key_rows = []
-        self._s4_add_key_row()   # seed with one empty row
+        self._s4_dim_rows = []
+        self._s4_add_dim_row(DIM_LAYER, 1)
+        self._s4_add_dim_row(DIM_LAYER, 2)
         layout.Items.Add(forms.StackLayoutItem(self._s4_keys_layout))
 
         # Results tree grid
@@ -1802,124 +1733,96 @@ class LinderoForm(forms.Form):
         page.Content = layout
         return page
 
-    def _s4_add_key_row(self, initial_text=""):
-        """Append one attribute-key combo row to the S4 dynamic list."""
+    def _s4_add_dim_row(self, kind=DIM_USERTEXT, arg=None):
+        """Append one dimension row: [kind dropdown][key combo | depth stepper][✕]."""
         row = forms.StackLayout()
         row.Orientation = forms.Orientation.Horizontal
         row.Spacing = 4
 
-        cb = forms.ComboBox()
-        cb.DataStore = self.available_keys
-        cb.Text = initial_text
-        cb.Width = 280
-        self._ks_s4[id(cb)] = _t.bind_key_search(cb, self.available_keys)
+        kind_dd = forms.DropDown()
+        kind_dd.Items.Add("UserText key")
+        kind_dd.Items.Add("Layer @ depth")
+        kind_dd.Width = 120
+        kind_dd.SelectedIndex = 1 if kind == DIM_LAYER else 0
+
+        key_cb = forms.ComboBox()
+        key_cb.DataStore = self.available_keys
+        key_cb.Text = str(arg) if (kind == DIM_USERTEXT and arg) else ""
+        key_cb.Width = 190
+        self._ks_s4[id(key_cb)] = _t.bind_key_search(key_cb, self.available_keys)
+
+        depth_st = forms.NumericStepper()
+        depth_st.MinValue      = 1
+        depth_st.MaxValue      = 8
+        depth_st.DecimalPlaces = 0
+        depth_st.Increment     = 1
+        depth_st.Width         = 60
+        depth_st.Value         = int(arg) if (kind == DIM_LAYER and arg) else 1
 
         rm_btn = forms.Button()
         rm_btn.Text = "✕"
         rm_btn.Width = 28
 
-        def on_remove(s, e, r=row, c=cb):
-            self._s4_remove_key_row(r, c)
+        rec = {"kind_dd": kind_dd, "key_cb": key_cb,
+               "depth_st": depth_st, "row": row}
+
+        def on_kind_changed(s, e, r=rec):
+            is_layer = r["kind_dd"].SelectedIndex == 1
+            r["key_cb"].Visible   = not is_layer
+            r["depth_st"].Visible = is_layer
+        kind_dd.SelectedIndexChanged += on_kind_changed
+
+        def on_remove(s, e, r=rec):
+            self._s4_remove_dim_row(r)
         rm_btn.Click += on_remove
 
-        row.Items.Add(forms.StackLayoutItem(cb, True))
+        row.Items.Add(forms.StackLayoutItem(kind_dd))
+        row.Items.Add(forms.StackLayoutItem(key_cb, True))
+        row.Items.Add(forms.StackLayoutItem(depth_st))
         row.Items.Add(forms.StackLayoutItem(rm_btn))
+        on_kind_changed(None, None)
 
-        self._s4_key_rows.append(cb)
+        self._s4_dim_rows.append(rec)
         self._s4_keys_layout.Items.Add(forms.StackLayoutItem(row))
 
-    def _on_s4_add_key(self, _s, _e):
-        self._s4_add_key_row()
+    def _on_s4_add_dim(self, _s, _e):
+        self._s4_add_dim_row()
 
-    def _s4_remove_key_row(self, row_ctrl, cb):
-        """Remove a key row, keeping at least one."""
-        if len(self._s4_key_rows) <= 1:
+    def _s4_remove_dim_row(self, rec):
+        """Remove a dimension row, keeping at least one."""
+        if len(self._s4_dim_rows) <= 1:
             return
-        if cb in self._s4_key_rows:
-            self._s4_key_rows.remove(cb)
-            self._ks_s4.pop(id(cb), None)
+        if rec in self._s4_dim_rows:
+            self._s4_dim_rows.remove(rec)
+            self._ks_s4.pop(id(rec["key_cb"]), None)
         for i in range(self._s4_keys_layout.Items.Count):
-            if self._s4_keys_layout.Items[i].Control is row_ctrl:
+            if self._s4_keys_layout.Items[i].Control is rec["row"]:
                 self._s4_keys_layout.Items.RemoveAt(i)
                 break
+
+    def _s4_clear_dim_rows(self):
+        """Remove all dimension rows (used by config load)."""
+        while self._s4_keys_layout.Items.Count > 0:
+            self._s4_keys_layout.Items.RemoveAt(0)
+        for rec in self._s4_dim_rows:
+            self._ks_s4.pop(id(rec["key_cb"]), None)
+        self._s4_dim_rows = []
+
+    def _s4_dims(self):
+        """Current dimension list [(kind, arg)], blank usertext rows dropped."""
+        dims = []
+        for rec in self._s4_dim_rows:
+            if rec["kind_dd"].SelectedIndex == 1:
+                dims.append((DIM_LAYER, int(rec["depth_st"].Value)))
+            else:
+                key = rec["key_cb"].Text.strip()
+                if key:
+                    dims.append((DIM_USERTEXT, key))
+        return dims
 
     # ------------------------------------------------------------------
     # Tab builders — R1 / R2
     # ------------------------------------------------------------------
-
-    def _tab_s5(self):
-        page = forms.TabPage()
-        page.Text = "S5 — Group Hierarchy"
-
-        controls = forms.DynamicLayout()
-        controls.DefaultSpacing = drawing.Size(5, 6)
-        controls.Padding = drawing.Padding(8)
-
-        desc = forms.Label()
-        desc.Text = "Parent layer + sublayers (each sublayer = one group). Objects at different heights within a group are summed as separate floors."
-        desc.TextColor = _t.TEXT_MUTED
-        controls.AddRow(desc)
-
-        sub5 = forms.Label()
-        sub5.Text = "Sublayer = Group"
-        sub5.Font = _t.F_SANS_B
-        sub5.TextColor = _t.HEADER
-        controls.AddRow(sub5)
-        controls.AddRow(None)
-
-        parent_lbl = forms.Label()
-        parent_lbl.Text = "Parent Layer:"
-        self.parent_layer_s5_dd = forms.ComboBox()
-        self.parent_layer_s5_dd.DataStore = list(self.available_layers)
-        self.parent_layer_s5_dd.PlaceholderText = "Type to filter layers…"
-        self.parent_layer_s5_dd.Width = 300
-        self._ks_layer_s5_par = _t.bind_key_search(self.parent_layer_s5_dd, self.available_layers)
-        controls.AddRow(parent_lbl, self.parent_layer_s5_dd)
-        controls.AddRow(None)
-
-        obj_key_lbl = forms.Label()
-        obj_key_lbl.Text = "Object Key:"
-        self.obj_key_s5 = forms.ComboBox()
-        self.obj_key_s5.DataStore = self.available_keys
-        self.obj_key_s5.PlaceholderText = "User text key for object labels"
-        self.obj_key_s5.Width = 300
-        self._ks_combos.append(_t.bind_key_search(self.obj_key_s5, self.available_keys))
-        controls.AddRow(obj_key_lbl, self.obj_key_s5)
-
-        grp_hdr = forms.Label()
-        grp_hdr.Text = "Groups — Combined Footprint (per Z band)"
-        grp_hdr.Font = _t.F_HEAD
-        self.results_s5_groups_grid = self._make_results_grid([(True, 0), (False, 110)])
-        grp_pane = forms.StackLayout()
-        grp_pane.Orientation = forms.Orientation.Vertical
-        grp_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
-        grp_pane.Items.Add(forms.StackLayoutItem(grp_hdr))
-        grp_pane.Items.Add(forms.StackLayoutItem(self.results_s5_groups_grid, True))
-
-        obj_hdr = forms.Label()
-        obj_hdr.Text = "Objects — Detail"
-        obj_hdr.Font = _t.F_HEAD
-        self.results_s5_objects_grid = self._make_results_grid([(True, 0), (False, 110)])
-        obj_pane = forms.StackLayout()
-        obj_pane.Orientation = forms.Orientation.Vertical
-        obj_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
-        obj_pane.Items.Add(forms.StackLayoutItem(obj_hdr))
-        obj_pane.Items.Add(forms.StackLayoutItem(self.results_s5_objects_grid, True))
-
-        splitter = forms.Splitter()
-        splitter.Orientation = forms.Orientation.Vertical
-        splitter.Panel1 = grp_pane
-        splitter.Panel2 = obj_pane
-        splitter.Position = 220
-
-        layout = forms.StackLayout()
-        layout.Orientation = forms.Orientation.Vertical
-        layout.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
-        layout.Items.Add(forms.StackLayoutItem(controls))
-        layout.Items.Add(forms.StackLayoutItem(splitter, True))
-
-        page.Content = layout
-        return page
 
     def _tab_r1(self):
         page = forms.TabPage()
@@ -1933,12 +1836,38 @@ class LinderoForm(forms.Form):
 
         desc = forms.Label()
         desc.Text = (
-            "Aggregates individual object areas by Object Key across all floors. "
-            "Compares totals to Room Target Key (set in Settings). "
-            "Data source: S3 keys or S4 hierarchy (configurable in Settings)."
+            "Aggregates merged footprint areas by the chosen dimension across "
+            "all levels of the S3 Parent Layer. Compares totals against the "
+            "Target Areas table (Settings)."
         )
         desc.TextColor = _t.TEXT_MUTED
         desc.Wrap = forms.WrapMode.Word
+
+        dim_row = forms.StackLayout()
+        dim_row.Orientation = forms.Orientation.Horizontal
+        dim_row.Spacing = 6
+        dim_lbl = forms.Label()
+        dim_lbl.Text = "Aggregate by:"
+        self.r1_dim_dd = forms.DropDown()
+        self.r1_dim_dd.Items.Add("Category (layer)")
+        self.r1_dim_dd.Items.Add("Level (layer)")
+        self.r1_dim_dd.Items.Add("UserText key")
+        self.r1_dim_dd.SelectedIndex = 0
+        self.r1_dim_dd.Width = 150
+        self.r1_key_cb = forms.ComboBox()
+        self.r1_key_cb.DataStore = self.available_keys
+        self.r1_key_cb.PlaceholderText = "User text key"
+        self.r1_key_cb.Width = 180
+        self.r1_key_cb.Visible = False
+        self._ks_combos.append(_t.bind_key_search(self.r1_key_cb, self.available_keys))
+
+        def _r1_dim_changed(s, e):
+            self.r1_key_cb.Visible = (self.r1_dim_dd.SelectedIndex == 2)
+        self.r1_dim_dd.SelectedIndexChanged += _r1_dim_changed
+
+        dim_row.Items.Add(forms.StackLayoutItem(dim_lbl))
+        dim_row.Items.Add(forms.StackLayoutItem(self.r1_dim_dd))
+        dim_row.Items.Add(forms.StackLayoutItem(self.r1_key_cb))
 
         self.warn_r1 = forms.Label()
         self.warn_r1.TextColor = _t.TEXT_ERROR
@@ -1955,6 +1884,7 @@ class LinderoForm(forms.Form):
         scroll_r1.Content = self.chart_r1
 
         layout.Items.Add(forms.StackLayoutItem(desc))
+        layout.Items.Add(forms.StackLayoutItem(dim_row))
         layout.Items.Add(forms.StackLayoutItem(self.warn_r1))
         layout.Items.Add(forms.StackLayoutItem(scroll_r1, True))
 
@@ -1973,12 +1903,38 @@ class LinderoForm(forms.Form):
 
         desc = forms.Label()
         desc.Text = (
-            "Aggregates individual object areas by Group Key across all floors. "
-            "Compares totals to Group Target Key (set in Settings). "
-            "Data source: S3 keys or S4 hierarchy (configurable in Settings)."
+            "Same engine as R1 with its own dimension — e.g. R1 per category, "
+            "R2 per level. Uses the S3 Parent Layer and the Target Areas "
+            "table (Settings)."
         )
         desc.TextColor = _t.TEXT_MUTED
         desc.Wrap = forms.WrapMode.Word
+
+        dim_row = forms.StackLayout()
+        dim_row.Orientation = forms.Orientation.Horizontal
+        dim_row.Spacing = 6
+        dim_lbl = forms.Label()
+        dim_lbl.Text = "Aggregate by:"
+        self.r2_dim_dd = forms.DropDown()
+        self.r2_dim_dd.Items.Add("Category (layer)")
+        self.r2_dim_dd.Items.Add("Level (layer)")
+        self.r2_dim_dd.Items.Add("UserText key")
+        self.r2_dim_dd.SelectedIndex = 1
+        self.r2_dim_dd.Width = 150
+        self.r2_key_cb = forms.ComboBox()
+        self.r2_key_cb.DataStore = self.available_keys
+        self.r2_key_cb.PlaceholderText = "User text key"
+        self.r2_key_cb.Width = 180
+        self.r2_key_cb.Visible = False
+        self._ks_combos.append(_t.bind_key_search(self.r2_key_cb, self.available_keys))
+
+        def _r2_dim_changed(s, e):
+            self.r2_key_cb.Visible = (self.r2_dim_dd.SelectedIndex == 2)
+        self.r2_dim_dd.SelectedIndexChanged += _r2_dim_changed
+
+        dim_row.Items.Add(forms.StackLayoutItem(dim_lbl))
+        dim_row.Items.Add(forms.StackLayoutItem(self.r2_dim_dd))
+        dim_row.Items.Add(forms.StackLayoutItem(self.r2_key_cb))
 
         self.warn_r2 = forms.Label()
         self.warn_r2.TextColor = _t.TEXT_ERROR
@@ -1995,6 +1951,7 @@ class LinderoForm(forms.Form):
         scroll_r2.Content = self.chart_r2
 
         layout.Items.Add(forms.StackLayoutItem(desc))
+        layout.Items.Add(forms.StackLayoutItem(dim_row))
         layout.Items.Add(forms.StackLayoutItem(self.warn_r2))
         layout.Items.Add(forms.StackLayoutItem(scroll_r2, True))
 
@@ -2006,6 +1963,16 @@ class LinderoForm(forms.Form):
     # ------------------------------------------------------------------
 
     def _tab_settings(self):
+        # LAYOUT CONVENTIONS (empirically stable inside this Scrollable —
+        # broke twice before settling here, v0.8→v0.8.2):
+        #   · label + control rows:      layout.AddRow(lbl, ctrl)
+        #   · long hints: explicit "\n" breaks, column 2 via AddRow(None, x).
+        #     Never rely on Wrap inside the Scrollable — a wrapping Label
+        #     reports its UNWRAPPED width as preferred size and blows the
+        #     scroll canvas out horizontally.
+        #   · short headers/separators:  AddRow(x) in column 1 is fine.
+        #   · the dynamic target table (StackLayout) also lives in column 2 —
+        #     rows have fixed widths, so it cannot widen the canvas.
         page = forms.TabPage()
         page.Text = "Settings"
 
@@ -2013,51 +1980,26 @@ class LinderoForm(forms.Form):
         layout.DefaultSpacing = drawing.Size(5, 8)
         layout.Padding = drawing.Padding(12)
 
-        # ── Program Key Mapping ──────────────────────────────────────
+        # ── General ──────────────────────────────────────────────────
         sec1 = forms.Label()
-        sec1.Text = "Program Key Mapping"
+        sec1.Text = "General"
         sec1.Font = _t.F_HEAD
         layout.AddRow(sec1)
         layout.AddRow(None)
 
-        rtk_lbl = forms.Label()
-        rtk_lbl.Text = "Room Target Key:"
-        self.room_target_key_dd = forms.ComboBox()
-        self.room_target_key_dd.DataStore = self.available_keys
-        self.room_target_key_dd.PlaceholderText = "Key holding target area per room"
-        self.room_target_key_dd.Width = 280
-        self._ks_combos.append(_t.bind_key_search(self.room_target_key_dd, self.available_keys))
-        rtk_hint = forms.Label()
-        rtk_hint.Text = "Key containing the target area per room type"
-        rtk_hint.TextColor = _t.TEXT_MUTED
-        layout.AddRow(rtk_lbl, self.room_target_key_dd)
-        layout.AddRow(None, rtk_hint)
-        layout.AddRow(None)
-
-        gtk_lbl = forms.Label()
-        gtk_lbl.Text = "Group Target Key:"
-        self.grp_target_key_dd = forms.ComboBox()
-        self.grp_target_key_dd.DataStore = self.available_keys
-        self.grp_target_key_dd.PlaceholderText = "Key holding target area per group"
-        self.grp_target_key_dd.Width = 280
-        self._ks_combos.append(_t.bind_key_search(self.grp_target_key_dd, self.available_keys))
-        gtk_hint = forms.Label()
-        gtk_hint.Text = "Key containing the target area per group"
-        gtk_hint.TextColor = _t.TEXT_MUTED
-        layout.AddRow(gtk_lbl, self.grp_target_key_dd)
-        layout.AddRow(None, gtk_hint)
-        layout.AddRow(None)
-
-        # ── Tolerance ────────────────────────────────────────────────
-        sep1 = forms.Label()
-        sep1.Text = "─" * 42
-        sep1.TextColor = _t.TEXT_MUTED
-        layout.AddRow(sep1)
-
-        sec2 = forms.Label()
-        sec2.Text = "Tolerance"
-        sec2.Font = _t.F_HEAD
-        layout.AddRow(sec2)
+        pref_lbl = forms.Label()
+        pref_lbl.Text = "Ignore Prefix:"
+        self.ignore_prefix_tb = forms.TextBox()
+        self.ignore_prefix_tb.Text = _lp.DEFAULT_IGNORE_PREFIX
+        self.ignore_prefix_tb.Width = 60
+        pref_hint = forms.Label()
+        pref_hint.Text = (
+            "Layers whose name starts with this prefix are excluded together\n"
+            "with their whole subtree (S3, S4, R1, R2). Empty = nothing ignored."
+        )
+        pref_hint.TextColor = _t.TEXT_MUTED
+        layout.AddRow(pref_lbl, self.ignore_prefix_tb)
+        layout.AddRow(None, pref_hint)
         layout.AddRow(None)
 
         tol_lbl = forms.Label()
@@ -2103,72 +2045,54 @@ class LinderoForm(forms.Form):
         self.z_height_tol_stepper.Width         = 80
         zh_hint = forms.Label()
         zh_hint.Text = (
-            "Min. Z gap (model units) to treat same-layer objects as separate floors.\n"
-            "S1 and S2 only — S3, S4, R1, R2 use sublayers to separate floors\n"
-            "and are not affected by this setting."
+            "Min. Z gap (model units) to treat objects in one group as\n"
+            "separate floors before merging overlaps. Applies to all scenarios."
         )
         zh_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(zh_lbl, self.z_height_tol_stepper)
         layout.AddRow(None, zh_hint)
         layout.AddRow(None)
 
-        # ── R1 / R2 Data Source ───────────────────────────────────────
+        # ── Target Areas (R1 / R2) ────────────────────────────────────
         sep2 = forms.Label()
         sep2.Text = "─" * 42
         sep2.TextColor = _t.TEXT_MUTED
         layout.AddRow(sep2)
 
         sec3 = forms.Label()
-        sec3.Text = "R1 / R2 Data Source"
+        sec3.Text = "Target Areas (R1 / R2)"
         sec3.Font = _t.F_HEAD
         layout.AddRow(sec3)
         layout.AddRow(None)
 
-        src_lbl = forms.Label()
-        src_lbl.Text = "Source:"
-        self.r1r2_source_dd = forms.DropDown()
-        self.r1r2_source_dd.Items.Add("S3 keys")
-        self.r1r2_source_dd.Items.Add("S4 hierarchy")
-        self.r1r2_source_dd.Items.Add("S5 hierarchy")
-        self.r1r2_source_dd.SelectedIndex = 0
-        self.r1r2_source_dd.Width = 180
-        src_hint = forms.Label()
-        src_hint.Text = "Which parent layer and keys feed the R1 and R2 bullet charts"
-        src_hint.TextColor = _t.TEXT_MUTED
-        layout.AddRow(src_lbl, self.r1r2_source_dd)
-        layout.AddRow(None, src_hint)
-        layout.AddRow(None)
+        tgt_hint = forms.Label()
+        tgt_hint.Text = (
+            "Label must match the aggregation value — e.g. a category layer\n"
+            "name ('Pflege'), a level name, or a user-text value.\n"
+            "Values in model units²; decimal comma accepted."
+        )
+        tgt_hint.TextColor = _t.TEXT_MUTED
+        layout.AddRow(None, tgt_hint)
 
-        r1_lvl_lbl = forms.Label()
-        r1_lvl_lbl.Text = "R1 Room Level:"
-        self.r1_level_stepper = forms.NumericStepper()
-        self.r1_level_stepper.MinValue     = 1
-        self.r1_level_stepper.MaxValue     = 10
-        self.r1_level_stepper.Value        = 1
-        self.r1_level_stepper.DecimalPlaces = 0
-        self.r1_level_stepper.Increment    = 1
-        self.r1_level_stepper.Width        = 60
-        r1_lvl_hint = forms.Label()
-        r1_lvl_hint.Text = "Position in S4 key list used as room key  (1 = top level)"
-        r1_lvl_hint.TextColor = _t.TEXT_MUTED
-        layout.AddRow(r1_lvl_lbl, self.r1_level_stepper)
-        layout.AddRow(None, r1_lvl_hint)
-        layout.AddRow(None)
+        self._targets_layout = forms.StackLayout()
+        self._targets_layout.Orientation = forms.Orientation.Vertical
+        self._targets_layout.Spacing = 3
+        layout.AddRow(None, self._targets_layout)
 
-        r2_lvl_lbl = forms.Label()
-        r2_lvl_lbl.Text = "R2 Group Level:"
-        self.r2_level_stepper = forms.NumericStepper()
-        self.r2_level_stepper.MinValue     = 1
-        self.r2_level_stepper.MaxValue     = 10
-        self.r2_level_stepper.Value        = 2
-        self.r2_level_stepper.DecimalPlaces = 0
-        self.r2_level_stepper.Increment    = 1
-        self.r2_level_stepper.Width        = 60
-        r2_lvl_hint = forms.Label()
-        r2_lvl_hint.Text = "Position in S4 key list used as group key  (1 = top level)"
-        r2_lvl_hint.TextColor = _t.TEXT_MUTED
-        layout.AddRow(r2_lvl_lbl, self.r2_level_stepper)
-        layout.AddRow(None, r2_lvl_hint)
+        add_tgt_btn = forms.Button()
+        add_tgt_btn.Text = "+ Add Target"
+        add_tgt_btn.Click += self._on_add_target
+
+        fill_tgt_btn = forms.Button()
+        fill_tgt_btn.Text = "Fill from last S3"
+        fill_tgt_btn.Click += self._on_fill_targets_from_s3
+
+        tgt_btn_row = forms.StackLayout()
+        tgt_btn_row.Orientation = forms.Orientation.Horizontal
+        tgt_btn_row.Spacing = 6
+        tgt_btn_row.Items.Add(forms.StackLayoutItem(add_tgt_btn))
+        tgt_btn_row.Items.Add(forms.StackLayoutItem(fill_tgt_btn))
+        layout.AddRow(None, tgt_btn_row)
         layout.AddRow(None)
 
         # ── Configuration ────────────────────────────────────────────
@@ -2192,7 +2116,12 @@ class LinderoForm(forms.Form):
         load_btn.Click += self.on_load_config
 
         cfg_hint = forms.Label()
-        cfg_hint.Text = 'Saves / loads all settings to "lindero_config.json"'
+        cfg_hint.Text = (
+            "Settings persist automatically per model: stored in the 3dm as\n"
+            "document user text when the window closes, restored on the next\n"
+            "launch (save the model to keep them). Save / Load Config\n"
+            "exchanges the same settings as a JSON file between models."
+        )
         cfg_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(save_btn, load_btn)
         layout.AddRow(None, cfg_hint)
@@ -2218,6 +2147,123 @@ class LinderoForm(forms.Form):
             dd.Text = ""
 
     # ------------------------------------------------------------------
+    # Settings helpers — ignore prefix, target table, R dimensions
+    # ------------------------------------------------------------------
+
+    def _ignore_prefix(self):
+        """Current ignore prefix from Settings. Empty = nothing ignored."""
+        return self.ignore_prefix_tb.Text.strip()
+
+    def _add_target_row(self, label="", value=""):
+        """Append one [label][value][✕] row to the Settings target table."""
+        row = forms.StackLayout()
+        row.Orientation = forms.Orientation.Horizontal
+        row.Spacing = 4
+
+        label_tb = forms.TextBox()
+        label_tb.Text = label
+        label_tb.PlaceholderText = "Label (category / level / key value)"
+        label_tb.Width = 240
+
+        value_tb = forms.TextBox()
+        value_tb.Text = value
+        value_tb.PlaceholderText = "Target"
+        value_tb.Width = 90
+
+        rm_btn = forms.Button()
+        rm_btn.Text = "✕"
+        rm_btn.Width = 28
+
+        rec = {"label_tb": label_tb, "value_tb": value_tb, "row": row}
+
+        def on_remove(s, e, r=rec):
+            self._remove_target_row(r)
+        rm_btn.Click += on_remove
+
+        row.Items.Add(forms.StackLayoutItem(label_tb))
+        row.Items.Add(forms.StackLayoutItem(value_tb))
+        row.Items.Add(forms.StackLayoutItem(rm_btn))
+
+        self._target_rows.append(rec)
+        self._targets_layout.Items.Add(forms.StackLayoutItem(row))
+
+    def _on_add_target(self, _s, _e):
+        self._add_target_row()
+
+    def _remove_target_row(self, rec):
+        if rec in self._target_rows:
+            self._target_rows.remove(rec)
+        for i in range(self._targets_layout.Items.Count):
+            if self._targets_layout.Items[i].Control is rec["row"]:
+                self._targets_layout.Items.RemoveAt(i)
+                break
+
+    def _clear_target_rows(self):
+        while self._targets_layout.Items.Count > 0:
+            self._targets_layout.Items.RemoveAt(0)
+        self._target_rows = []
+
+    def _targets_dict(self):
+        """(targets {label: float}, invalid_count) from the Settings table.
+        Decimal commas accepted; blank labels skipped."""
+        targets, invalid = {}, 0
+        for rec in self._target_rows:
+            label = rec["label_tb"].Text.strip()
+            raw   = rec["value_tb"].Text.strip().replace(",", ".")
+            if not label:
+                continue
+            try:
+                targets[label] = float(raw)
+            except (ValueError, TypeError):
+                invalid += 1
+        return targets, invalid
+
+    def _on_fill_targets_from_s3(self, _s, _e):
+        """Seed target rows from the categories of the last S3 result."""
+        if not self._last_s3 or not self._last_s3.get("category_overall"):
+            self.status_label.Text = (
+                "Run Calculate on S3 first — categories are taken from its result."
+            )
+            self.status_label.TextColor = _t.TEXT_WARN
+            return
+        existing = {rec["label_tb"].Text.strip() for rec in self._target_rows}
+        added = 0
+        for cat in sorted(self._last_s3["category_overall"]):
+            if cat != _lp.PLACEHOLDER and cat not in existing:
+                self._add_target_row(cat, "")
+                added += 1
+        self.status_label.Text = (
+            f"{added} categor{'y' if added == 1 else 'ies'} added — "
+            "fill in the target values."
+        )
+        self.status_label.TextColor = _t.TEXT_OK if added else _t.TEXT_MUTED
+
+    def _r_dim(self, dd, cb):
+        """Dimension from an R-tab picker, or None if usertext with no key."""
+        idx = dd.SelectedIndex
+        if idx == 0:
+            return (DIM_CATEGORY, None)
+        if idx == 1:
+            return (DIM_LEVEL, None)
+        key = cb.Text.strip()
+        return (DIM_USERTEXT, key) if key else None
+
+    def _apply_r_dim(self, serial, dd, cb):
+        """Restore an R-tab picker from its config serialization."""
+        if not serial:
+            return
+        kind = serial[0]
+        arg  = serial[1] if len(serial) > 1 else None
+        if kind == DIM_CATEGORY:
+            dd.SelectedIndex = 0
+        elif kind == DIM_LEVEL:
+            dd.SelectedIndex = 1
+        else:
+            dd.SelectedIndex = 2
+            cb.Text = str(arg or "")
+        cb.Visible = (dd.SelectedIndex == 2)
+
+    # ------------------------------------------------------------------
     # Event handlers — model / navigation
     # ------------------------------------------------------------------
 
@@ -2225,7 +2271,6 @@ class LinderoForm(forms.Form):
         prev_s2     = self._selected_layer(self.layer_s2_dd)
         prev_parent = self._selected_layer(self.parent_layer_dd)
         prev_s4_par = self._selected_layer(self.parent_layer_s4_dd)
-        prev_s5_par = self._selected_layer(self.parent_layer_s5_dd)
 
         self.available_keys   = get_all_user_text_keys()
         self.available_layers = all_layer_names()
@@ -2239,7 +2284,6 @@ class LinderoForm(forms.Form):
         self._restore_layer_dd(self.layer_s2_dd,        prev_s2,     self._ks_layer_s2)
         self._restore_layer_dd(self.parent_layer_dd,    prev_parent, self._ks_layer_parent)
         self._restore_layer_dd(self.parent_layer_s4_dd, prev_s4_par, self._ks_layer_s4_par)
-        self._restore_layer_dd(self.parent_layer_s5_dd, prev_s5_par, self._ks_layer_s5_par)
 
         self._ks_write(["Area"] + list(self.available_keys))
 
@@ -2260,9 +2304,8 @@ class LinderoForm(forms.Form):
                 1: self._run_s2,
                 2: self._run_s3,
                 3: self._run_s4,
-                4: self._run_s5,
-                5: self._run_r1,
-                6: self._run_r2,
+                4: self._run_r1,
+                5: self._run_r2,
             }
             fn = runners.get(idx)
             if fn:
@@ -2281,20 +2324,17 @@ class LinderoForm(forms.Form):
         elif idx == 1:
             self.results_s2_grid.DataStore = forms.TreeGridItemCollection()
         elif idx == 2:
-            self.results_s3_groups_grid.DataStore  = forms.TreeGridItemCollection()
-            self.results_s3_objects_grid.DataStore = forms.TreeGridItemCollection()
+            self.results_s3_breakdown_grid.DataStore = forms.TreeGridItemCollection()
+            self.results_s3_objects_grid.DataStore   = forms.TreeGridItemCollection()
+            self._last_s3 = None
         elif idx == 3:
             self.results_s4_grid.DataStore = forms.TreeGridItemCollection()
             self._last_s4 = None
         elif idx == 4:
-            self.results_s5_groups_grid.DataStore  = forms.TreeGridItemCollection()
-            self.results_s5_objects_grid.DataStore = forms.TreeGridItemCollection()
-            self._last_s5 = None
-        elif idx == 5:
             self._r1_entries = []
             self.warn_r1.Visible = False
             self.chart_r1.Invalidate()
-        elif idx == 6:
+        elif idx == 5:
             self._r2_entries = []
             self.warn_r2.Visible = False
             self.chart_r2.Invalidate()
@@ -2328,10 +2368,10 @@ class LinderoForm(forms.Form):
 
     def on_export_png(self, _sender, _e):
         idx = self.tabs.SelectedIndex
-        if idx == 5:
+        if idx == 4:
             entries, tol, unit = self._r1_entries, self._r1_tol, self._r1_unit
             default_name = "Lindero_R1_RoomAnalysis"
-        elif idx == 6:
+        elif idx == 5:
             entries, tol, unit = self._r2_entries, self._r2_tol, self._r2_unit
             default_name = "Lindero_R2_GroupAnalysis"
         else:
@@ -2363,6 +2403,73 @@ class LinderoForm(forms.Form):
             self.status_label.Text = f"PNG export failed: {ex}"
             self.status_label.TextColor = _t.TEXT_ERROR
 
+    def on_copy_window(self, _sender, _e):
+        """
+        Screenshot this window (incl. title bar) onto the Windows clipboard,
+        ready to paste into chat/mail — replaces the Snagit round-trip.
+
+        The window rectangle is read from Win32 in PHYSICAL pixels
+        (DwmGetWindowAttribute EXTENDED_FRAME_BOUNDS, GetWindowRect as
+        fallback) — the same virtual-desktop coordinate space
+        CopyFromScreen captures in, so no DPI math is involved.
+        Do NOT derive the rect from Eto's logical Bounds × LogicalPixelSize:
+        with monitors of different scale factors the logical→physical
+        mapping shifts per screen, which grabbed the wrong monitor
+        (bug 02.07.2026). Windows-only by design (WinForms clipboard).
+        """
+        try:
+            import ctypes
+            from ctypes import wintypes
+            import clr
+            clr.AddReference("System.Drawing")
+            clr.AddReference("System.Windows.Forms")
+            import System.Drawing as _sd
+            import System.Windows.Forms as _swf
+
+            try:
+                hwnd = self.NativeHandle.ToInt64()
+            except AttributeError:
+                hwnd = int(self.NativeHandle)
+            if not hwnd:
+                raise RuntimeError("no native window handle")
+
+            # Visually tight window rect (excludes the invisible resize
+            # border Win10/11 adds around GetWindowRect).
+            rect = wintypes.RECT()
+            got = False
+            try:
+                DWMWA_EXTENDED_FRAME_BOUNDS = 9
+                res = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+                    wintypes.HWND(hwnd), DWMWA_EXTENDED_FRAME_BOUNDS,
+                    ctypes.byref(rect), ctypes.sizeof(rect))
+                got = (res == 0)
+            except Exception:
+                got = False
+            if not got:
+                if not ctypes.windll.user32.GetWindowRect(
+                        wintypes.HWND(hwnd), ctypes.byref(rect)):
+                    raise RuntimeError("GetWindowRect failed")
+
+            x = rect.left
+            y = rect.top
+            w = max(1, rect.right - rect.left)
+            h = max(1, rect.bottom - rect.top)
+
+            bmp = _sd.Bitmap(w, h)
+            g = _sd.Graphics.FromImage(bmp)
+            try:
+                g.CopyFromScreen(x, y, 0, 0, _sd.Size(w, h))
+            finally:
+                g.Dispose()
+            _swf.Clipboard.SetImage(bmp)
+
+            self.status_label.Text = (
+                "Window copied to clipboard — paste with Ctrl+V.")
+            self.status_label.TextColor = _t.TEXT_OK
+        except Exception as ex:
+            self.status_label.Text = f"Copy failed: {ex}"
+            self.status_label.TextColor = _t.TEXT_ERROR
+
     # ------------------------------------------------------------------
     # Event handlers — Write Area
     # ------------------------------------------------------------------
@@ -2387,14 +2494,13 @@ class LinderoForm(forms.Form):
         elif idx == 1 and self._last_s2:
             objects = self._last_s2["objects"]
         elif idx == 2 and self._last_s3:
-            for sl_data in self._last_s3["sublayers"].values():
-                objects += sl_data["objects"]
-        elif idx == 4 and self._last_s5:
-            for sl_data in self._last_s5["sublayers"].values():
-                objects += sl_data["objects"]
+            for lv in self._last_s3["levels"].values():
+                objects += lv["objects"]
+        elif idx == 3 and self._last_s4:
+            objects = self._last_s4.get("objects") or []
 
         if not objects:
-            self.status_label.Text = "No calculated data — run Calculate first on S1, S2, or S3."
+            self.status_label.Text = "No calculated data — run Calculate first on S1, S2, S3, or S4."
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
@@ -2420,6 +2526,106 @@ class LinderoForm(forms.Form):
     # Event handlers — Settings config
     # ------------------------------------------------------------------
 
+    def _gather_config(self):
+        """Current settings as a config-v2 dict — shared by the JSON export
+        and the per-document auto-persist."""
+        def _dim_serial(dd, cb):
+            idx = dd.SelectedIndex
+            if idx == 0:
+                return [DIM_CATEGORY, None]
+            if idx == 1:
+                return [DIM_LEVEL, None]
+            return [DIM_USERTEXT, cb.Text.strip()]
+
+        return {
+            "config_version":    2,
+            "tolerance_percent": self.tolerance_stepper.Value,
+            "decimal_places":    int(self.decimal_stepper.Value),
+            "z_height_tol":      self.z_height_tol_stepper.Value,
+            "ignore_prefix":     self._ignore_prefix(),
+            "s3_parent_layer":   self._selected_layer(self.parent_layer_dd) or "",
+            "s4_parent_layer":   self._selected_layer(self.parent_layer_s4_dd) or "",
+            "s4_dimensions":     [[k, a] for k, a in self._s4_dims()],
+            "r1_dimension":      _dim_serial(self.r1_dim_dd, self.r1_key_cb),
+            "r2_dimension":      _dim_serial(self.r2_dim_dd, self.r2_key_cb),
+            "targets":           self._targets_dict()[0],
+        }
+
+    def _apply_config(self, cfg):
+        """Apply a config dict (v1 or v2) to all controls. Returns version."""
+        version = int(cfg.get("config_version", 1))
+
+        self.tolerance_stepper.Value    = float(cfg.get("tolerance_percent", 10.0))
+        self.decimal_stepper.Value      = float(cfg.get("decimal_places", 2))
+        self.z_height_tol_stepper.Value = float(cfg.get("z_height_tol", 0.5))
+        self.ignore_prefix_tb.Text      = cfg.get(
+            "ignore_prefix", _lp.DEFAULT_IGNORE_PREFIX)
+
+        s3_par = cfg.get("s3_parent_layer", "")
+        if s3_par and s3_par in self.available_layers:
+            self.parent_layer_dd.Text = s3_par
+        s4_par = cfg.get("s4_parent_layer", "")
+        if s4_par and s4_par in self.available_layers:
+            self.parent_layer_s4_dd.Text = s4_par
+
+        if version >= 2:
+            dims = cfg.get("s4_dimensions") or []
+            if dims:
+                self._s4_clear_dim_rows()
+                for d in dims:
+                    kind = d[0] if len(d) > 0 else DIM_USERTEXT
+                    arg  = d[1] if len(d) > 1 else None
+                    self._s4_add_dim_row(kind, arg)
+                if not self._s4_dim_rows:
+                    self._s4_add_dim_row()
+            self._apply_r_dim(cfg.get("r1_dimension"),
+                              self.r1_dim_dd, self.r1_key_cb)
+            self._apply_r_dim(cfg.get("r2_dimension"),
+                              self.r2_dim_dd, self.r2_key_cb)
+            targets = cfg.get("targets") or {}
+            if targets:
+                self._clear_target_rows()
+                for label in sorted(targets):
+                    self._add_target_row(label, str(targets[label]))
+        else:
+            # v1 migration: key sequence becomes UserText dimensions;
+            # target keys and the old data-source fields are obsolete.
+            key_seq = [k for k in (cfg.get("s4_key_sequence") or []) if k]
+            if key_seq:
+                self._s4_clear_dim_rows()
+                for k in key_seq:
+                    self._s4_add_dim_row(DIM_USERTEXT, k)
+        return version
+
+    # Per-document persistence -----------------------------------------
+    # The current settings live in the 3dm (document user text) so each
+    # model remembers its own setup: written when the window closes and
+    # whenever a config is saved/loaded, restored at startup. They stay
+    # until a new config replaces them. NOTE: the 3dm must be saved for
+    # the settings to survive — they ride inside the model file.
+
+    def _store_doc_config(self):
+        try:
+            rs.SetDocumentUserText(
+                DOC_CONFIG_KEY,
+                json.dumps(self._gather_config(), ensure_ascii=False))
+        except Exception:
+            pass  # never block closing on a persistence hiccup
+
+    def _load_doc_config(self):
+        """Restore settings persisted in the document. True if applied."""
+        try:
+            raw = rs.GetDocumentUserText(DOC_CONFIG_KEY)
+            if raw:
+                self._apply_config(json.loads(raw))
+                return True
+        except Exception:
+            pass
+        return False
+
+    def on_form_closed(self, _s, _e):
+        self._store_doc_config()
+
     def on_save_config(self, _s, _e):
         path = rs.SaveFileName(
             "Save Lindero Configuration",
@@ -2431,21 +2637,10 @@ class LinderoForm(forms.Form):
         _prefs_set('lindero_config', path)
         if not path.lower().endswith(".json"):
             path += ".json"
-        cfg = {
-            "room_target_key":   self.room_target_key_dd.Text.strip(),
-            "group_target_key":  self.grp_target_key_dd.Text.strip(),
-            "tolerance_percent": self.tolerance_stepper.Value,
-            "decimal_places":    int(self.decimal_stepper.Value),
-            "s4_parent_layer":   self._selected_layer(self.parent_layer_s4_dd) or "",
-            "s4_key_sequence":   [cb.Text.strip() for cb in self._s4_key_rows],
-            "r1r2_source":       self.r1r2_source_dd.SelectedIndex,
-            "r1_level_index":    int(self.r1_level_stepper.Value),
-            "r2_level_index":    int(self.r2_level_stepper.Value),
-            "z_height_tol":      self.z_height_tol_stepper.Value,
-        }
         try:
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2)
+                json.dump(self._gather_config(), f, indent=2, ensure_ascii=False)
+            self._store_doc_config()
             self.status_label.Text = f"Config saved → {path}"
             self.status_label.TextColor = _t.TEXT_OK
         except Exception as ex:
@@ -2464,34 +2659,18 @@ class LinderoForm(forms.Form):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-            self.room_target_key_dd.Text  = cfg.get("room_target_key", "")
-            self.grp_target_key_dd.Text   = cfg.get("group_target_key", "")
-            self.tolerance_stepper.Value  = float(cfg.get("tolerance_percent", 10.0))
-            self.decimal_stepper.Value    = float(cfg.get("decimal_places", 2))
-            self.r1r2_source_dd.SelectedIndex = int(cfg.get("r1r2_source", 0))
-            self.r1_level_stepper.Value   = float(cfg.get("r1_level_index", 1))
-            self.r2_level_stepper.Value   = float(cfg.get("r2_level_index", 2))
-            self.z_height_tol_stepper.Value = float(cfg.get("z_height_tol", 0.5))
-
-            # Restore S4 parent layer
-            s4_par = cfg.get("s4_parent_layer", "")
-            if s4_par and s4_par in self.available_layers:
-                self.parent_layer_s4_dd.Text = s4_par
-
-            # Restore S4 key sequence
-            key_seq = cfg.get("s4_key_sequence", [])
-            if key_seq:
-                # Clear all existing rows
-                while self._s4_keys_layout.Items.Count > 0:
-                    self._s4_keys_layout.Items.RemoveAt(0)
-                self._s4_key_rows.clear()
-                for txt in key_seq:
-                    self._s4_add_key_row(txt)
-                if not self._s4_key_rows:
-                    self._s4_add_key_row()
-
-            self.status_label.Text = f"Config loaded ← {path}"
-            self.status_label.TextColor = _t.TEXT_OK
+            version = self._apply_config(cfg)
+            # The loaded config becomes the persistent one for this model.
+            self._store_doc_config()
+            if version >= 2:
+                self.status_label.Text = f"Config loaded ← {path}"
+                self.status_label.TextColor = _t.TEXT_OK
+            else:
+                self.status_label.Text = (
+                    f"v1 config loaded ← {path}  —  target keys / data-source "
+                    "fields are obsolete; define Target Areas in Settings."
+                )
+                self.status_label.TextColor = _t.TEXT_WARN
         except Exception as ex:
             self.status_label.Text = f"Load failed: {ex}"
             self.status_label.TextColor = _t.TEXT_ERROR
@@ -2559,32 +2738,59 @@ class LinderoForm(forms.Form):
             return
 
         obj_key = self.obj_key_s3.Text.strip()
-        grp_key = self.grp_key_s3.Text.strip()
-        data    = calc_s3(parent, obj_key, grp_key)
+        prefix  = self._ignore_prefix()
+        data    = calc_s3(parent, obj_key, prefix,
+                          float(self.z_height_tol_stepper.Value))
 
-        non_empty = [sl for sl, d in data["sublayers"].items() if d["objects"]]
-        if not non_empty:
-            self.results_s3_groups_grid.DataStore  = forms.TreeGridItemCollection()
-            self.results_s3_objects_grid.DataStore = forms.TreeGridItemCollection()
-            self.status_label.Text = "No objects found in sublayers."
+        if not any(d["objects"] for d in data["levels"].values()):
+            self.results_s3_breakdown_grid.DataStore = forms.TreeGridItemCollection()
+            self.results_s3_objects_grid.DataStore   = forms.TreeGridItemCollection()
+            self.status_label.Text = (
+                f"No measurable objects under '{short_name(parent)}' "
+                f"(ignore prefix '{prefix}') — try Preview Structure."
+            )
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
-        self._populate_s3_groups_grid(data, grp_key)
-        self._populate_s3_objects_grid(data, grp_key)
+        self._populate_s3_breakdown_grid(data)
+        self._populate_s3_objects_grid(data)
         self._last_s3 = data
         self._export_data = {
             "scenario": 3, "unit": unit,
-            "params": {"parent": parent, "obj_key": obj_key, "grp_key": grp_key},
-            "sublayers": data["sublayers"],
+            "params": {"parent": parent, "obj_key": obj_key,
+                       "ignore_prefix": prefix},
+            "levels": data["levels"],
             "overall_total": data["overall_total"],
+            "category_overall": data["category_overall"],
+            "layer_info": data["layer_info"],
+            "warnings": data["warnings"],
         }
+        n_warn = sum(len(d["warnings"]) for d in data["levels"].values())
+        n_warn += len(data["warnings"])
         self.status_label.Text = (
             f"S3  —  '{short_name(parent)}'  |  "
-            f"{len(data['sublayers'])} sublayer(s)  |  "
+            f"{len(data['levels'])} level(s)  |  "
             f"Overall total: {_fmt(data['overall_total'])} {unit}"
+            + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
-        self.status_label.TextColor = _t.TEXT_OK
+        self.status_label.TextColor = _t.TEXT_WARN if n_warn else _t.TEXT_OK
+
+    def on_preview_s3(self, _s, _e):
+        """Dry-run preview: layer roles + object counts, no area math."""
+        parent = self._selected_layer(self.parent_layer_dd)
+        if not parent:
+            self.status_label.Text = "Please select a parent layer."
+            self.status_label.TextColor = _t.TEXT_ERROR
+            return
+        prefix = self._ignore_prefix()
+        pv = preview_hierarchy(parent, prefix)
+        self._populate_s3_preview_grid(pv, prefix)
+        self.status_label.Text = (
+            f"Preview  —  {len(pv['tree'])} level(s), "
+            f"{pv['total_objects']} object(s) included, "
+            f"{len(pv['ignored'])} layer(s) ignored. Nothing calculated yet."
+        )
+        self.status_label.TextColor = _t.TEXT_MUTED
 
     # ------------------------------------------------------------------
     # S4 grid helpers
@@ -2726,114 +2932,123 @@ class LinderoForm(forms.Form):
         grid.DataStore = collection
 
     # ------------------------------------------------------------------
-    # Grid populate helpers — S3 (groups panel)
+    # Grid populate helpers — S3 (breakdown panel)
     # ------------------------------------------------------------------
 
-    def _populate_s3_groups_grid(self, data, grp_key):
-        """Floor header rows with group children; overall total at the bottom."""
+    def _populate_s3_breakdown_grid(self, data):
+        """Level rows with category children, building-wide category summary,
+        overall total, and global warnings."""
         collection = forms.TreeGridItemCollection()
-        for sl, sl_data in data["sublayers"].items():
-            union_note = "  [union failed]" if not sl_data["union_ok"] else ""
-            floor_item = forms.TreeGridItem()
-            floor_item.Values = [
-                f"▸ {short_name(sl)}{union_note}",
-                _fmt(sl_data["total"]).rjust(10),
+        for level, lv in data["levels"].items():
+            union_note = "  [union failed]" if not lv["union_ok"] else ""
+            level_item = forms.TreeGridItem()
+            level_item.Values = [
+                f"▸ {level}{union_note}",
+                _fmt(lv["total"]).rjust(10),
                 10,
             ]
-            floor_item.Expanded = True
-            if sl_data["group_totals"] and grp_key:
-                for i, (gv, ga) in enumerate(sorted(sl_data["group_totals"].items())):
-                    child = forms.TreeGridItem()
-                    child.Values = [f"  {gv}", _fmt(ga).rjust(10), i % 2]
-                    floor_item.Children.Add(child)
-                group_sum = sum(sl_data["group_totals"].values())
-                cross = group_sum - sl_data["total"]
-                if cross > 1e-6:
-                    w = forms.TreeGridItem()
-                    w.Values = [f"  Cross-group overlap: {_fmt(cross)}", "", 40]
-                    floor_item.Children.Add(w)
-            collection.Add(floor_item)
+            level_item.Expanded = True
+            for i, (cat, ca) in enumerate(sorted(lv["category_totals"].items())):
+                child = forms.TreeGridItem()
+                child.Values = [f"  {cat}", _fmt(ca).rjust(10), i % 2]
+                level_item.Children.Add(child)
+            for w_text in lv["warnings"]:
+                w = forms.TreeGridItem()
+                w.Values = [f"  [!] {w_text}", "", 40]
+                level_item.Children.Add(w)
+            collection.Add(level_item)
+
+        if data["category_overall"]:
+            cat_hdr = forms.TreeGridItem()
+            cat_hdr.Values = ["▸ CATEGORIES — whole building", "", 10]
+            cat_hdr.Expanded = True
+            for i, (cat, ca) in enumerate(sorted(data["category_overall"].items())):
+                child = forms.TreeGridItem()
+                child.Values = [f"  {cat}", _fmt(ca).rjust(10), i % 2]
+                cat_hdr.Children.Add(child)
+            collection.Add(cat_hdr)
+
         total_item = forms.TreeGridItem()
-        total_item.Values = ["OVERALL TOTAL", _fmt(data["overall_total"]).rjust(10), 30]
+        total_item.Values = ["OVERALL TOTAL (sum of levels)",
+                             _fmt(data["overall_total"]).rjust(10), 30]
         collection.Add(total_item)
-        self.results_s3_groups_grid.DataStore = collection
+
+        for w_text in data.get("warnings", []):
+            w = forms.TreeGridItem()
+            w.Values = [f"  {w_text}", "", 40]
+            collection.Add(w)
+        self.results_s3_breakdown_grid.DataStore = collection
 
     # ------------------------------------------------------------------
     # Grid populate helpers — S3 (objects panel)
     # ------------------------------------------------------------------
 
-    def _populate_s3_objects_grid(self, data, grp_key):
-        """Floor header rows with object children (name + group + area)."""
+    def _populate_s3_objects_grid(self, data):
+        """Level header rows with object children (name + category + area)."""
         collection = forms.TreeGridItemCollection()
-        for sl, sl_data in data["sublayers"].items():
-            floor_item = forms.TreeGridItem()
-            floor_item.Values = [f"▸ {short_name(sl)}", "", "", 10]
-            floor_item.Expanded = True
-            for i, o in enumerate(sl_data["objects"]):
+        for level, lv in data["levels"].items():
+            level_item = forms.TreeGridItem()
+            level_item.Values = [f"▸ {level}", "", "", 10]
+            level_item.Expanded = True
+            for i, o in enumerate(lv["objects"]):
                 child = forms.TreeGridItem()
-                grp = o.get("group", "") if grp_key else ""
-                child.Values = [o["name"], grp, _fmt(o["area"]).rjust(10), i % 2]
-                floor_item.Children.Add(child)
-            individual_sum = sum(o["area"] for o in sl_data["objects"])
-            overlap = individual_sum - sl_data["total"]
+                child.Values = [o["name"], o["category"],
+                                _fmt(o["area"]).rjust(10), i % 2]
+                level_item.Children.Add(child)
+            individual_sum = sum(o["area"] for o in lv["objects"])
+            overlap = individual_sum - lv["total"]
             if overlap > 1e-6:
                 w = forms.TreeGridItem()
                 w.Values = [f"  Overlap: {_fmt(overlap)}", "", "", 40]
-                floor_item.Children.Add(w)
-            if sl_data.get("skipped", 0) > 0:
+                level_item.Children.Add(w)
+            if lv.get("skipped", 0) > 0:
                 w = forms.TreeGridItem()
-                w.Values = [f"  {sl_data['skipped']} object(s) skipped", "", "", 40]
-                floor_item.Children.Add(w)
-            collection.Add(floor_item)
+                w.Values = [f"  {lv['skipped']} object(s) skipped", "", "", 40]
+                level_item.Children.Add(w)
+            collection.Add(level_item)
         self.results_s3_objects_grid.DataStore = collection
 
     # ------------------------------------------------------------------
-    # Grid populate helpers — S5
+    # Grid populate helpers — S3 (structure preview)
     # ------------------------------------------------------------------
 
-    def _populate_s5_groups_grid(self, data):
-        """Group header rows with Z-band children; overall total at the bottom."""
+    def _populate_s3_preview_grid(self, pv, prefix):
+        """Dry-run view in the breakdown panel: counts, not areas."""
         collection = forms.TreeGridItemCollection()
-        for sl, sl_data in data["sublayers"].items():
-            union_note = "  [union failed]" if not sl_data["union_ok"] else ""
-            grp_item = forms.TreeGridItem()
-            grp_item.Values = [
-                f"▸ {short_name(sl)}{union_note}",
-                _fmt(sl_data["total"]).rjust(10),
-                10,
-            ]
-            grp_item.Expanded = True
-            for i, zt in enumerate(sl_data["z_totals"]):
-                child = forms.TreeGridItem()
-                child.Values = [f"  Z = {zt['z']:.2f}", _fmt(zt["area"]).rjust(10), i % 2]
-                grp_item.Children.Add(child)
-            if sl_data.get("skipped", 0) > 0:
-                w = forms.TreeGridItem()
-                w.Values = [f"  {sl_data['skipped']} object(s) skipped", "", 40]
-                grp_item.Children.Add(w)
-            collection.Add(grp_item)
-        total_item = forms.TreeGridItem()
-        total_item.Values = ["OVERALL TOTAL", _fmt(data["overall_total"]).rjust(10), 30]
-        collection.Add(total_item)
-        self.results_s5_groups_grid.DataStore = collection
+        hdr = forms.TreeGridItem()
+        hdr.Values = ["PREVIEW — object counts (no areas computed)", "", 10]
+        collection.Add(hdr)
 
-    def _populate_s5_objects_grid(self, data):
-        """Group header rows with object children (name + individual area)."""
-        collection = forms.TreeGridItemCollection()
-        for sl, sl_data in data["sublayers"].items():
-            grp_item = forms.TreeGridItem()
-            grp_item.Values = [f"▸ {short_name(sl)}", "", 10]
-            grp_item.Expanded = True
-            for i, o in enumerate(sl_data["objects"]):
+        for level in sorted(pv["tree"], key=_lp.level_sort_key):
+            cats = pv["tree"][level]
+            level_item = forms.TreeGridItem()
+            level_item.Values = [f"▸ {level}",
+                                 str(sum(cats.values())).rjust(10), 10]
+            level_item.Expanded = True
+            for i, cat in enumerate(sorted(cats)):
                 child = forms.TreeGridItem()
-                child.Values = [o["name"], _fmt(o["area"]).rjust(10), i % 2]
-                grp_item.Children.Add(child)
-            if sl_data.get("skipped", 0) > 0:
-                w = forms.TreeGridItem()
-                w.Values = [f"  {sl_data['skipped']} object(s) skipped", "", 40]
-                grp_item.Children.Add(w)
-            collection.Add(grp_item)
-        self.results_s5_objects_grid.DataStore = collection
+                child.Values = [f"  {cat}", str(cats[cat]).rjust(10), i % 2]
+                level_item.Children.Add(child)
+            collection.Add(level_item)
+
+        if pv["ignored"]:
+            ign_item = forms.TreeGridItem()
+            ign_item.Values = [f"▸ IGNORED (prefix '{prefix}')",
+                               str(len(pv["ignored"])).rjust(10), 10]
+            ign_item.Expanded = True
+            for i, lp_full in enumerate(pv["ignored"]):
+                child = forms.TreeGridItem()
+                child.Values = [f"  {lp_full}", "", 40]
+                ign_item.Children.Add(child)
+            collection.Add(ign_item)
+
+        if pv["parent_direct_objects"]:
+            w = forms.TreeGridItem()
+            w.Values = [
+                f"  [!] {pv['parent_direct_objects']} object(s) directly on "
+                "the parent layer — not measured", "", 40]
+            collection.Add(w)
+        self.results_s3_breakdown_grid.DataStore = collection
 
     # ------------------------------------------------------------------
     # Per-scenario runner — S4
@@ -2846,18 +3061,22 @@ class LinderoForm(forms.Form):
             self.status_label.TextColor = _t.TEXT_ERROR
             return
 
-        key_seq = [cb.Text.strip() for cb in self._s4_key_rows]
-        key_seq = [k for k in key_seq if k]   # drop blank entries
-        if not key_seq:
-            self.status_label.Text = "S4 requires at least one attribute key."
+        dims = self._s4_dims()
+        if not dims:
+            self.status_label.Text = "S4 requires at least one dimension."
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
-        data = calc_s4(parent, key_seq)
+        prefix = self._ignore_prefix()
+        data = calc_s4(parent, dims, prefix,
+                       float(self.z_height_tol_stepper.Value))
 
         if not data["tree"]:
             self.results_s4_grid.DataStore = forms.TreeGridItemCollection()
-            self.status_label.Text = "No objects found in sublayers."
+            self.status_label.Text = (
+                f"No measurable objects under '{short_name(parent)}' "
+                f"(ignore prefix '{prefix}')."
+            )
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
@@ -2865,209 +3084,92 @@ class LinderoForm(forms.Form):
         self._last_s4 = data
         self._export_data = {
             "scenario": 4, "unit": unit,
-            "params": {"parent": parent, "key_sequence": key_seq},
+            "params": {"parent": parent, "dims": dims,
+                       "dim_labels": [_dim_label(d) for d in dims],
+                       "ignore_prefix": prefix},
             "tree": data["tree"],
             "overall_total": data["overall_total"],
         }
         n_warn = len(data["warnings"])
         self.status_label.Text = (
             f"S4  —  '{short_name(parent)}'  |  "
-            f"{len(key_seq)} level(s)  |  "
-            f"Overall total: {_fmt(data['overall_total'])} {unit}"
+            + " > ".join(_dim_label(d) for d in dims)
+            + f"  |  Overall total: {_fmt(data['overall_total'])} {unit}"
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
         self.status_label.TextColor = (
             _t.TEXT_WARN if n_warn else _t.TEXT_OK
         )
-
-    # ------------------------------------------------------------------
-    # Per-scenario runner — S5
-    # ------------------------------------------------------------------
-
-    def _run_s5(self, unit):
-        parent = self._selected_layer(self.parent_layer_s5_dd)
-        if not parent:
-            self.status_label.Text = "Please select a parent layer."
-            self.status_label.TextColor = _t.TEXT_ERROR
-            return
-
-        obj_key = self.obj_key_s5.Text.strip()
-        z_tol   = float(self.z_height_tol_stepper.Value)
-        data    = calc_s5(parent, obj_key, z_tol)
-
-        non_empty = [sl for sl, d in data["sublayers"].items() if d["objects"]]
-        if not non_empty:
-            self.results_s5_groups_grid.DataStore  = forms.TreeGridItemCollection()
-            self.results_s5_objects_grid.DataStore = forms.TreeGridItemCollection()
-            self.status_label.Text = "No objects found in sublayers."
-            self.status_label.TextColor = _t.TEXT_WARN
-            return
-
-        self._populate_s5_groups_grid(data)
-        self._populate_s5_objects_grid(data)
-        self._last_s5 = data
-        self._export_data = {
-            "scenario": 5, "unit": unit,
-            "params": {"parent": parent, "obj_key": obj_key},
-            "sublayers": data["sublayers"],
-            "overall_total": data["overall_total"],
-        }
-        self.status_label.Text = (
-            f"S5  —  '{short_name(parent)}'  |  "
-            f"{len(data['sublayers'])} group(s)  |  "
-            f"Overall total: {_fmt(data['overall_total'])} {unit}"
-        )
-        self.status_label.TextColor = _t.TEXT_OK
 
     # ------------------------------------------------------------------
     # Per-scenario runners — R1 / R2
     # ------------------------------------------------------------------
 
-    def _run_r1(self, unit):
-        source_idx = self.r1r2_source_dd.SelectedIndex  # 0=S3 keys, 1=S4 hierarchy, 2=S5 hierarchy
+    def _run_r(self, unit, tag, dim_dd, key_cb, chart, warn_lbl, store):
+        """Shared R1/R2 runner. store: ('_r1'|'_r2') state prefix."""
+        parent = self._selected_layer(self.parent_layer_dd)
+        if not parent:
+            self.status_label.Text = (
+                f"{tag} uses the S3 Parent Layer — select one on the S3 tab.")
+            self.status_label.TextColor = _t.TEXT_ERROR
+            return
 
-        if source_idx == 0:
-            parent  = self._selected_layer(self.parent_layer_dd)
-            obj_key = self.obj_key_s3.Text.strip()
-            if not parent:
-                self.status_label.Text = "R1 uses S3 Parent Layer — select one on the S3 tab."
-                self.status_label.TextColor = _t.TEXT_ERROR
-                return
-            if not obj_key:
-                self.status_label.Text = "R1 uses S3 Object Key — set one on the S3 tab."
-                self.status_label.TextColor = _t.TEXT_WARN
-                return
-        elif source_idx == 1:
-            parent  = self._selected_layer(self.parent_layer_s4_dd)
-            key_seq = [cb.Text.strip() for cb in self._s4_key_rows]
-            idx     = int(self.r1_level_stepper.Value) - 1   # 0-based
-            if not parent:
-                self.status_label.Text = "R1 uses S4 Parent Layer — select one on the S4 tab."
-                self.status_label.TextColor = _t.TEXT_ERROR
-                return
-            if idx < 0 or idx >= len(key_seq) or not key_seq[idx]:
-                self.status_label.Text = (
-                    f"R1: Level {idx + 1} is undefined in the S4 key sequence."
-                )
-                self.status_label.TextColor = _t.TEXT_WARN
-                return
-            obj_key = key_seq[idx]
-        else:
-            parent  = self._selected_layer(self.parent_layer_s5_dd)
-            obj_key = self.obj_key_s5.Text.strip()
-            if not parent:
-                self.status_label.Text = "R1 uses S5 Parent Layer — select one on the S5 tab."
-                self.status_label.TextColor = _t.TEXT_ERROR
-                return
-            if not obj_key:
-                self.status_label.Text = "R1 uses S5 Object Key — set one on the S5 tab."
-                self.status_label.TextColor = _t.TEXT_WARN
-                return
-
-        room_target_key = self.room_target_key_dd.Text.strip()
-        tol  = self.tolerance_stepper.Value / 100.0
-        data = calc_r1(parent, obj_key, room_target_key)
-
-        if not data["entries"]:
-            self.status_label.Text = "No objects found — check parent layer setting."
+        dim = self._r_dim(dim_dd, key_cb)
+        if dim is None:
+            self.status_label.Text = (
+                f"{tag}: choose a user text key (or another dimension).")
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
-        self._r1_entries = data["entries"]
-        self._r1_tol     = tol
-        self._r1_unit    = unit
+        targets, n_invalid = self._targets_dict()
+        tol  = self.tolerance_stepper.Value / 100.0
+        data = calc_r(parent, dim, targets, self._ignore_prefix(),
+                      float(self.z_height_tol_stepper.Value))
+
+        if not data["entries"]:
+            self.status_label.Text = (
+                "No measurable objects found — check the S3 parent layer "
+                "and the ignore prefix.")
+            self.status_label.TextColor = _t.TEXT_WARN
+            return
+
+        warnings = list(data["warnings"])
+        if n_invalid:
+            warnings.append(
+                f"[!] {n_invalid} target value(s) are not numbers — ignored.")
+
+        setattr(self, store + "_entries", data["entries"])
+        setattr(self, store + "_tol", tol)
+        setattr(self, store + "_unit", unit)
         n = len(data["entries"])
-        self.chart_r1.Size = drawing.Size(
-            max(400, self.chart_r1.Width),
+        chart.Size = drawing.Size(
+            max(400, chart.Width),
             max(10, n * _CHART_ROW_H + 20)
         )
-        self.chart_r1.Invalidate()
+        chart.Invalidate()
 
-        if data["warnings"]:
-            self.warn_r1.Text    = "\n".join(data["warnings"])
-            self.warn_r1.Visible = True
+        if warnings:
+            warn_lbl.Text    = "\n".join(warnings)
+            warn_lbl.Visible = True
         else:
-            self.warn_r1.Visible = False
+            warn_lbl.Visible = False
 
-        n_warn = len(data["warnings"])
-        src_tag = {0: "S3", 1: "S4", 2: "S5"}.get(source_idx, "S3")
         self.status_label.Text = (
-            f"R1  [{src_tag}]  —  {n} room type(s)  |  Tolerance: {tol*100:.1f}%"
-            + (f"  |  {n_warn} warning(s)" if n_warn else "")
+            f"{tag}  [{_dim_label(dim)}]  —  {n} entr{'y' if n == 1 else 'ies'}"
+            f"  |  Tolerance: {tol*100:.1f}%"
+            + (f"  |  {len(warnings)} warning(s)" if warnings else "")
         )
         self.status_label.TextColor = (
-            _t.TEXT_WARN if n_warn else _t.TEXT_OK
+            _t.TEXT_WARN if warnings else _t.TEXT_OK
         )
+
+    def _run_r1(self, unit):
+        self._run_r(unit, "R1", self.r1_dim_dd, self.r1_key_cb,
+                    self.chart_r1, self.warn_r1, "_r1")
 
     def _run_r2(self, unit):
-        source_idx = self.r1r2_source_dd.SelectedIndex  # 0=S3 keys, 1=S4 hierarchy, 2=S5 hierarchy
-
-        if source_idx == 2:
-            self.status_label.Text = "R2 is not available for S5 — groups are defined by sublayer, not a key. Use R1 with S5."
-            self.status_label.TextColor = _t.TEXT_WARN
-            return
-
-        if source_idx == 0:
-            parent  = self._selected_layer(self.parent_layer_dd)
-            grp_key = self.grp_key_s3.Text.strip()
-            if not parent:
-                self.status_label.Text = "R2 uses S3 Parent Layer — select one on the S3 tab."
-                self.status_label.TextColor = _t.TEXT_ERROR
-                return
-            if not grp_key:
-                self.status_label.Text = "R2 uses S3 Group Key — set one on the S3 tab."
-                self.status_label.TextColor = _t.TEXT_WARN
-                return
-        else:
-            parent  = self._selected_layer(self.parent_layer_s4_dd)
-            key_seq = [cb.Text.strip() for cb in self._s4_key_rows]
-            idx     = int(self.r2_level_stepper.Value) - 1   # 0-based
-            if not parent:
-                self.status_label.Text = "R2 uses S4 Parent Layer — select one on the S4 tab."
-                self.status_label.TextColor = _t.TEXT_ERROR
-                return
-            if idx < 0 or idx >= len(key_seq) or not key_seq[idx]:
-                self.status_label.Text = (
-                    f"R2: Level {idx + 1} is undefined in the S4 key sequence."
-                )
-                self.status_label.TextColor = _t.TEXT_WARN
-                return
-            grp_key = key_seq[idx]
-
-        grp_target_key = self.grp_target_key_dd.Text.strip()
-        tol  = self.tolerance_stepper.Value / 100.0
-        data = calc_r2(parent, grp_key, grp_target_key)
-
-        if not data["entries"]:
-            self.status_label.Text = "No objects found — check parent layer setting."
-            self.status_label.TextColor = _t.TEXT_WARN
-            return
-
-        self._r2_entries = data["entries"]
-        self._r2_tol     = tol
-        self._r2_unit    = unit
-        n = len(data["entries"])
-        self.chart_r2.Size = drawing.Size(
-            max(400, self.chart_r2.Width),
-            max(10, n * _CHART_ROW_H + 20)
-        )
-        self.chart_r2.Invalidate()
-
-        if data["warnings"]:
-            self.warn_r2.Text    = "\n".join(data["warnings"])
-            self.warn_r2.Visible = True
-        else:
-            self.warn_r2.Visible = False
-
-        n_warn = len(data["warnings"])
-        src_tag = "S3" if source_idx == 0 else "S4"  # S5 returns early above
-        self.status_label.Text = (
-            f"R2  [{src_tag}]  —  {n} group(s)  |  Tolerance: {tol*100:.1f}%"
-            + (f"  |  {n_warn} warning(s)" if n_warn else "")
-        )
-        self.status_label.TextColor = (
-            _t.TEXT_WARN if n_warn else _t.TEXT_OK
-        )
+        self._run_r(unit, "R2", self.r2_dim_dd, self.r2_key_cb,
+                    self.chart_r2, self.warn_r2, "_r2")
 
     # ------------------------------------------------------------------
     # Bullet chart paint handlers
@@ -3236,93 +3338,89 @@ def _xl_s2(wb, data, unit):
 def _xl_s3(wb, data, unit):
     params  = data["params"]
     obj_col = params["obj_key"] or "Object Name"
-    grp_col = params["grp_key"] or "Group"
     parent  = params["parent"]
-    has_grp = bool(params["grp_key"])
+    levels  = data["levels"]
 
+    # ── Sheet 1: Objects — flat, pivot-ready ─────────────────────────
     ws = wb.create_sheet("Objects")
-    _col_widths(ws, [38, 28, 28, 30, 28, 20])
-    row = _hdr(ws, 1, ["GUID", "Parent Layer", "Level", obj_col, grp_col, f"Footprint Area ({unit})"])
-    for sl, sl_data in data["sublayers"].items():
-        level = short_name(sl)
-        for obj in sl_data["objects"]:
+    _col_widths(ws, [38, 28, 22, 28, 30, 20])
+    row = _hdr(ws, 1, ["GUID", "Parent Layer", "Level", "Category", obj_col,
+                       f"Footprint Area ({unit})"])
+    for level, lv in levels.items():
+        for obj in lv["objects"]:
             ws.cell(row, 1, obj["guid"])
             ws.cell(row, 2, parent)
             ws.cell(row, 3, level)
-            ws.cell(row, 4, obj["name"])
-            ws.cell(row, 5, obj["group"])
+            ws.cell(row, 4, obj["category"])
+            ws.cell(row, 5, obj["name"])
             ws.cell(row, 6, obj["area"]).number_format = _AREA_FMT
             row += 1
 
+    # ── Sheet 2: Summary — Level × Category matrix ───────────────────
+    cats = sorted({c for lv in levels.values() for c in lv["category_totals"]})
+    n_cols = len(cats) + 2  # Level | categories… | Level Total
+
     ws2 = wb.create_sheet("Summary")
-    _col_widths(ws2, [30, 28, 22])
-    row = _hdr(ws2, 1, ["S3 — Layer Hierarchy", "", f"[{unit}]"])
+    _col_widths(ws2, [26] + [20] * (n_cols - 1))
+    row = _hdr(ws2, 1, ["S3 — Layer Hierarchy", f"[{unit}]"])
 
     for label, value in [
-        ("Parent Layer", parent),
-        ("Object Key",   params["obj_key"] or "(object name / GUID)"),
-        ("Group Key",    params["grp_key"] or "—"),
+        ("Parent Layer",  parent),
+        ("Object Key",    params["obj_key"] or "(object name / GUID)"),
+        ("Ignore Prefix", params.get("ignore_prefix", "")),
     ]:
         ws2.cell(row, 1, label).font = Font(bold=True)
         ws2.cell(row, 2, value)
         row += 1
     row += 1
 
-    row = _sec(ws2, row, "Combined Footprint by Level", n_cols=2)
-    ws2.cell(row, 1, "Level").font           = Font(bold=True)
-    ws2.cell(row, 2, f"Area ({unit})").font  = Font(bold=True)
-    row += 1
-    for sl, sl_data in data["sublayers"].items():
-        note = "" if sl_data["union_ok"] else " [union failed]"
-        ws2.cell(row, 1, short_name(sl) + note)
-        ws2.cell(row, 2, sl_data["total"]).number_format = _AREA_FMT
-        row += 1
-    row = _tot(ws2, row, "Grand Total", data["overall_total"])
+    row = _sec(ws2, row, "Combined Footprint — Level × Category", n_cols=n_cols)
+    ws2.cell(row, 1, "Level").font = Font(bold=True)
+    for ci, cat in enumerate(cats, 2):
+        ws2.cell(row, ci, cat).font = Font(bold=True)
+    ws2.cell(row, n_cols, "Level Total").font = Font(bold=True)
     row += 1
 
-    if has_grp:
-        row = _sec(ws2, row, f"Combined Footprint by Level and {grp_col}", n_cols=3)
-        ws2.cell(row, 1, "Level").font          = Font(bold=True)
-        ws2.cell(row, 2, grp_col).font          = Font(bold=True)
-        ws2.cell(row, 3, f"Area ({unit})").font = Font(bold=True)
+    for level, lv in levels.items():
+        note = "" if lv["union_ok"] else " [union failed]"
+        ws2.cell(row, 1, level + note)
+        for ci, cat in enumerate(cats, 2):
+            if cat in lv["category_totals"]:
+                c = ws2.cell(row, ci, lv["category_totals"][cat])
+                c.number_format = _AREA_FMT
+        tc = ws2.cell(row, n_cols, lv["total"])
+        tc.font          = _TOT_FONT
+        tc.number_format = _AREA_FMT
         row += 1
-        for sl, sl_data in data["sublayers"].items():
-            level = short_name(sl)
-            for gv, ga in sorted(sl_data["group_totals"].items()):
-                ws2.cell(row, 1, level)
-                ws2.cell(row, 2, gv)
-                ws2.cell(row, 3, ga).number_format = _AREA_FMT
-                row += 1
 
-    levels_with_overlap = []
-    for sl, sl_data in data["sublayers"].items():
-        individual_sum = sum(o["area"] for o in sl_data["objects"])
-        total_overlap  = individual_sum - sl_data["total"]
-        if total_overlap > 1e-6:
-            group_sum   = sum(sl_data["group_totals"].values()) if sl_data["group_totals"] else individual_sum
-            cross_group = group_sum - sl_data["total"]
-            levels_with_overlap.append((short_name(sl), total_overlap, cross_group))
+    # Bottom row: per-category building totals + grand total
+    cat_overall = data.get("category_overall", {})
+    lc = ws2.cell(row, 1, "CATEGORY TOTAL (all levels)")
+    lc.font = _TOT_FONT
+    lc.fill = _TOT_FILL
+    for ci, cat in enumerate(cats, 2):
+        c = ws2.cell(row, ci, cat_overall.get(cat, 0.0))
+        c.font          = _TOT_FONT
+        c.fill          = _TOT_FILL
+        c.number_format = _AREA_FMT
+    gc = ws2.cell(row, n_cols, data["overall_total"])
+    gc.font          = _TOT_FONT
+    gc.fill          = _TOT_FILL
+    gc.number_format = _AREA_FMT
+    row += 2
 
-    if levels_with_overlap:
-        row += 1
-        n_warn_cols = 3 if has_grp else 2
-        row = _sec(ws2, row, "[!] Overlap Warnings by Level", n_cols=n_warn_cols)
-        ws2.cell(row, 1, "Level").font                         = Font(bold=True)
-        ws2.cell(row, 2, f"Overlapping Area ({unit})").font   = Font(bold=True)
-        if has_grp:
-            ws2.cell(row, 3, f"of which Cross-group ({unit})").font = Font(bold=True)
-        row += 1
-        for level_name, total_ov, cross_ov in levels_with_overlap:
-            row = _warn(ws2, row, level_name, total_ov, n_cols=n_warn_cols)
-            if has_grp and cross_ov > 1e-6:
-                vc = ws2.cell(row - 1, 3, cross_ov)
-                vc.font          = _WARN_FONT
-                vc.fill          = _WARN_FILL
-                vc.number_format = _AREA_FMT
-        row += 1
-        row = _warn(ws2, row,
-                    "Some objects share footprint area. Verify whether double-counting is intentional.",
-                    n_cols=n_warn_cols)
+    # Note: Σ(category totals) ≥ level total when categories overlap —
+    # the matrix keeps both readings visible.
+    warn_rows = []
+    for level, lv in levels.items():
+        for w_text in lv["warnings"]:
+            warn_rows.append(f"{level}: {w_text}")
+    warn_rows += list(data.get("warnings", []))
+
+    if warn_rows:
+        row = _sec(ws2, row, "[!] Warnings", n_cols=n_cols)
+        for w_text in warn_rows:
+            row = _warn(ws2, row, w_text, n_cols=n_cols)
 
 
 def _xl_s4(wb, data, unit):
@@ -3334,7 +3432,8 @@ def _xl_s4(wb, data, unit):
     """
     params   = data["params"]
     parent   = params["parent"]
-    key_seq  = params["key_sequence"]
+    # v2 stores dimension labels; fall back to the v1 key list if present.
+    key_seq  = params.get("dim_labels") or params.get("key_sequence") or []
     depth    = len(key_seq)
     key_path = " > ".join(key_seq)
 

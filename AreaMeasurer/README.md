@@ -8,137 +8,109 @@ The tool runs as a **modeless window**, so Rhino stays fully interactive while t
 
 ---
 
+## Layer structure contract (v2)
+
+S3, S4, R1, and R2 read the model hierarchy **from the layer tree** (since v0.8 — see `PLAN.md` for the design decisions):
+
+```text
+07-PROPOSAL-Phase_03            ← PARENT (chosen in the UI)
+├── _BuildingVolumes            ← ignored (prefix) — whole subtree excluded
+├── Ebene_06                    ← LEVEL (direct child of the parent)
+│   ├── _TEXT                   ← ignored (prefix)
+│   ├── Diagnostik und Therapie ← CATEGORY — objects measured here
+│   ├── Pflege                  ← CATEGORY
+│   └── …
+├── Ebene_05 … Ebene_-03        ← more levels
+└── Ebene_KMA                   ← levels can have any name
+```
+
+- **Level** = each direct child of the parent.
+- **Category** = the object's **own (lowest) layer**. Deeper nesting is fine — the object's own layer name is always the category.
+- **Ignore prefix** (Settings, default `_`): a layer whose name starts with the prefix is excluded **together with its entire subtree**. Empty prefix = nothing ignored. The parent itself is never prefix-tested.
+- Objects directly on a level layer are measured with category `—` and reported as a warning. Objects directly on the parent are **not** measured (the preview reports them).
+
+The pure path logic lives in `_paths.py` and is headless-testable:
+
+```sh
+python AreaMeasurer/tests/test_paths.py
+```
+
+---
+
 ## Scenarios
 
 ### S1 — Selected Objects
-Calculates the footprint of each selected object and **merges overlapping regions** using a Boolean Union, preventing double-counting when objects share floor area.
+Calculates the footprint of each selected object and **merges overlapping regions**, preventing double-counting when objects share floor area. Objects are merged per layer (and per Z band); per-layer totals are then summed.
 
 - Results: area per object + individual sum + combined total (after overlap removal).
-- An **overlap warning** appears when the individual sum exceeds the combined total, reporting the overlapping area.
+- An **overlap warning** appears when the individual sum exceeds the combined total.
 - Objects are labelled using a user text key (optional); falls back to the Rhino object name or a short GUID.
 
----
-
 ### S2 — By Layer
-Calculates the footprints of all objects on a chosen layer and **merges overlapping regions** using a Boolean Union, preventing double-counting when two objects share floor area.
-
-- Results: individual area per object + combined layer total (after overlap removal).
-- An **overlap warning** appears when the individual sum exceeds the combined total, reporting the overlapping area so you can decide whether double-counting is intentional.
-
----
+Same merge logic for all objects on one chosen layer. Objects at different heights (Z-Height Tolerance, Settings) are treated as separate floors and summed.
 
 ### S3 — Layer Hierarchy
-Targets a parent layer whose **sublayers each represent one floor or level**. Overlaps are removed within each sublayer independently. The grand total is the **sum of all sublayer totals** — floors are additive (standard Gross Floor Area logic).
+Reads the **layer structure contract** above. Click **Preview Structure** first: a dry run showing which levels/categories will count, object counts, and the ignored layers — no areas computed.
 
-Two user text keys drive the breakdown:
+Aggregation rules:
 
-| Key | Purpose | Example attribute | Example value |
-| --- | --- | --- | --- |
-| Group Key | Larger classification | `Department` | `"Private"`, `"Services"` |
-| Object Key | Individual or small-group name | `SpaceType` | `"Office"`, `"Kitchen"` |
+1. Union per **(level, category)** → category totals per level.
+2. **Level total** = union across all the level's objects → `Σ(categories) − level total` = **cross-category overlap**, warned per level.
+3. **Grand total** = sum of level totals (floors are additive — GFA logic).
+4. **Category totals (whole building)** = per category, the sum of its per-level unions.
 
-- Results are shown in **two separate scrollable panels**: the top panel shows per-group subtotals (combined footprint per group within each level); the bottom panel shows per-object breakdown with the group it belongs to.
-- **Overlap warnings** are shown per level when objects share footprint area, including a breakdown of cross-group overlap (objects from different groups occupying the same footprint).
-
----
+Results are shown in two panels: the breakdown grid (levels with category children + building-wide category summary) and the object detail grid (object, category, area per level).
 
 ### S4 — Custom Aggregation
+User-defined hierarchy of **dimensions**. Each dimension is either:
 
-User-defined hierarchy of attribute keys. You define the levels yourself — for example: `Domain → Main Group → Subgroup → Room Type`. The UI lets you add or remove levels dynamically.
+| Dimension | Meaning |
+| --- | --- |
+| `Layer @ depth N` | Layer-path segment N levels below the parent (1 = level, 2 = the next segment, …) |
+| `UserText key` | A user text value on the object |
 
-Per sublayer, footprints are merged within each leaf group using a **Boolean Union** (same overlap logic as S3). Leaf totals are then summed across all floors.
+Default: `Layer @ 1 → Layer @ 2` (Level → Category — matches the contract out of the box). The old two-key S3 workflow is reproduced with two `UserText` dimensions.
 
-Results are displayed as a **colored grid**: group header rows have a neutral grey background; the grand total row is highlighted in green. Each non-leaf node shows the cumulative area of all its descendants.
+Footprints are merged per leaf group per level, then summed across levels. Results as an indented tree with cumulative areas per node.
 
-**Using S4 as a data source for R1 / R2:** once keys are defined in S4, you can point R1 and R2 at specific levels of the S4 hierarchy using the level index steppers in Settings — instead of pulling from S3's two-key model.
+### R1 / R2 — Analysis
+One shared engine, two tabs so two setups can coexist (e.g. R1 per category, R2 per level). Each tab picks its **Aggregate by** dimension: `Category (layer)`, `Level (layer)`, or a `UserText key`. Scope = the **S3 Parent Layer**.
 
----
-
-### R1 — Room Analysis
-
-Aggregates individual object areas **across all floors**, grouped by a chosen key value. Compares each room type's total against a **Room Target Key** (set in Settings).
-
-Data source (configurable in Settings): **S3 keys** (default) or **S4 hierarchy** at a chosen level index.
-
-- Results displayed as **bullet charts**: one row per unique key value.
-- Each chart row shows the measured total, the target value, and the ±% deviation.
-- Colour zones on the bar indicate whether the result is within tolerance (yellow = below goal, orange = above goal).
-- Missing target keys are reported as warnings in the tab without blocking the calculation.
-- Charts can be **exported as PNG** using the "Export Chart as PNG" button.
-
----
-
-### R2 — Group Analysis
-
-Same as R1 but aggregates by a **group-level key** and compares against a **Group Target Key** (set in Settings).
-
-Data source (configurable in Settings): **S3 keys** (default) or **S4 hierarchy** at a chosen level index.
-
-- Results displayed as bullet charts, one row per unique group key value.
-- Same warning and PNG export behaviour as R1.
+Merged areas are aggregated across all levels and compared against the **Target Areas** table (Settings) as bullet charts with the ± tolerance zones. Labels without a target chart as "(no target)" and warn. Charts export as PNG.
 
 ---
 
 ## Settings tab
 
-### Program Key Mapping
-
-Defines which user text keys hold the target area values used in R1 and R2:
-
-| Setting | Used by | Meaning |
-| --- | --- | --- |
-| Room Target Key | R1 | Attribute key whose value is the target area for that room type |
-| Group Target Key | R2 | Attribute key whose value is the target area for that group |
-
-Dropdowns are populated from all keys present in the model.
-
-### Decimal Places
-
-Controls the number of decimal places shown in all area results. Range: 0–4. Default: 2. Saved as part of the config file (`"decimal_places": 2`).
-
----
-
-### Tolerance
-
-**Global Tolerance (%)** — symmetric percentage applied to both R1 and R2 charts. Default: 10%. Range: 0–50%.
-
-A tolerance of 10% means the yellow band spans `goal × 0.90` to `goal`, and the orange band spans `goal` to `goal × 1.10`.
-
-### R1 / R2 Data Source
-
-Controls which parent layer and keys feed the R1 and R2 bullet charts:
-
-| Option | Behaviour |
+| Setting | Meaning |
 | --- | --- |
-| **S3 keys** (default) | R1 uses S3 Object Key; R2 uses S3 Group Key; parent layer from S3 tab |
-| **S4 hierarchy** | R1 and R2 pull from S4's key sequence using the level indices below |
+| **Ignore Prefix** | Default `_`. Excludes matching layers and their whole subtree (S3, S4, R1, R2). |
+| **Global Tolerance (%)** | Symmetric tolerance for the R1/R2 bullet charts. Default 10%. |
+| **Decimal Places** | 0–4, applies to all displayed results. |
+| **Z-Height Tolerance** | Min. Z gap (model units) to treat objects in one group as separate floors before merging. Applies to all scenarios. |
+| **Target Areas** | Label → target value rows for R1/R2. Label must match the aggregation value (category layer name, level name, or key value). Decimal comma accepted. **Fill from last S3** seeds rows from the last S3 result's categories. |
 
-**R1 Room Level** — 1-based position in the S4 key sequence to use as the room aggregation key (default: 1).
+### Configuration (config v2)
 
-**R2 Group Level** — 1-based position in the S4 key sequence to use as the group aggregation key (default: 2).
+Settings **persist automatically per model**: when the window closes (and whenever a config is saved or loaded), the current settings are written into the 3dm as document user text (`Lindero.config_v2`) and restored the next time Lindero opens with that model. Save the 3dm to keep them — they travel inside the model file. A loaded config replaces the persisted one.
 
-### Configuration
-
-- **Save Config** — saves all settings (key mapping, tolerance, S4 key sequence, R1/R2 source) to a JSON file.
-- **Load Config** — loads a previously saved config and populates all fields.
-
-Config file structure:
+**Save Config / Load Config** additionally exchanges the same settings as a JSON file (for sharing between models or machines). v1 config files still load (the S4 key list becomes UserText dimensions; obsolete v1 fields are skipped with a note).
 
 ```json
 {
-  "room_target_key": "TargetArea",
-  "group_target_key": "GroupTarget",
+  "config_version": 2,
   "tolerance_percent": 10.0,
   "decimal_places": 2,
-  "s4_parent_layer": "Building",
-  "s4_key_sequence": ["Domain", "Main Group", "Subgroup", "Room Type"],
-  "r1r2_source": 0,
-  "r1_level_index": 1,
-  "r2_level_index": 2
+  "z_height_tol": 0.5,
+  "ignore_prefix": "_",
+  "s3_parent_layer": "07-PROPOSAL-Phase_03",
+  "s4_parent_layer": "07-PROPOSAL-Phase_03",
+  "s4_dimensions": [["layer", 1], ["layer", 2]],
+  "r1_dimension": ["category", null],
+  "r2_dimension": ["level", null],
+  "targets": {"Pflege": 1200.0, "Diagnostik und Therapie": 2400.0}
 }
 ```
-
-`r1r2_source`: `0` = S3 keys, `1` = S4 hierarchy.
 
 ---
 
@@ -147,7 +119,7 @@ Config file structure:
 Each row in R1/R2 is drawn as follows (left to right):
 
 ```
-[Room label]  ░░░░▓▓▓[████████████]░░░▓▓▓░░░░   87.5/100.0
+[Label]       ░░░░▓▓▓[████████████]░░░▓▓▓░░░░   87.5/100.0
               ↑   ↑  ↑            ↑  ↑         -12.5%  [m²]
               │   │  └─ measured  │  └─ upper tolerance marker
               │   └─ lower        └─ goal line (dark vertical bar)
@@ -168,7 +140,7 @@ Each row in R1/R2 is drawn as follows (left to right):
 
 ## Write Area to Objects
 
-The **"Write Area to Objects"** button opens an inline panel below the button row (S1, S2, S3 only):
+The **"Write Area to Objects"** button opens an inline panel below the button row (S1–S4):
 
 1. Choose or type the user text key to write to (default: `Area`).
 2. Click **Confirm Write**.
@@ -183,27 +155,28 @@ Status bar confirms: `Area written to N object(s) using key 'Area'`.
 
 Available for S1, S2, S3, and S4.
 
-**S1, S2, S3** workbooks contain two sheets:
+**S1, S2** workbooks: an **Objects** sheet (one row per object) and a **Summary** sheet (parameters, totals, overlap warnings).
+
+**S3** workbooks:
 
 | Sheet | Contents |
 | --- | --- |
-| **Objects** | One row per measured object with GUID, layer/level, key values, and footprint area |
-| **Summary** | Scenario parameters, totals, group breakdowns, and any overlap warnings |
+| **Objects** | Flat, pivot-ready — GUID, parent, **Level**, **Category**, label, area |
+| **Summary** | **Level × Category matrix**: levels as rows, categories as columns, level totals on the right, building-wide category totals + grand total at the bottom, warnings highlighted in amber |
 
-**S4** workbooks contain two sheets:
-
-| Sheet | Contents |
-| --- | --- |
-| **Leaf Data** | Flat table — one row per unique key path (leaf), with one column per key level plus area. Useful for pivot tables. |
-| **Tree Summary** | Indented hierarchy showing the cumulative area at each node, matching the text area output. |
-
-Overlap warnings are highlighted in amber in Summary sheets.
+**S4** workbooks: **Leaf Data** (one row per unique dimension path — pivot-ready) and **Tree Summary** (indented hierarchy with cumulative areas). Column headers use the dimension labels (e.g. `Layer @ 1`).
 
 ---
 
 ## Export Chart as PNG
 
 Available when the R1 or R2 tab is active. Renders the full bullet chart to a 900 px wide PNG file at the path you choose. The chart height scales automatically with the number of entries (54 px per row).
+
+---
+
+## Copy Window
+
+The **"Copy Window"** button screenshots the entire Lindero window (including the title bar) straight onto the Windows clipboard — paste it into chat or mail with Ctrl+V. Works from any tab, capturing whatever results are currently visible. The capture rect comes from Win32 in physical pixels, so mixed-DPI multi-monitor setups work. Windows only.
 
 ---
 
@@ -232,6 +205,10 @@ Available when the R1 or R2 tab is active. Renders the full bullet chart to a 90
 ### What `|normal.Z| > 0.9` means
 
 The `0.9` is a threshold on the dot product between the face normal and the world Z axis — not a distance in model units. It means the face normal deviates less than ~26° from vertical, i.e. the face is less than ~26° from horizontal. This tolerance handles faces that are nominally flat but carry small modelling imperfections.
+
+### Footprint cache
+
+Within one calculation run every object's projection is computed **once** and reused across the per-object listing and all union calls (`_fp`). On a hospital-scale model (many levels × categories) this cuts the union workload substantially.
 
 ---
 
@@ -269,9 +246,9 @@ A future fix would replace the bottom-face method with a true top-down silhouett
 
 ---
 
-## Overlap removal (S1, S2, S3, and S4)
+## Overlap removal (all scenarios)
 
-Projected footprint curves are passed to `Rhino.Geometry.Curve.CreateBooleanUnion()` at the model's absolute tolerance. If the Boolean Union fails, the tool falls back to a plain sum and marks the result with `[union failed — sum shown]`.
+Projected footprint loops are resolved with a hole-aware planar arrangement (`Curve.CreateBooleanRegions` + point classification), with a pairwise inclusion–exclusion path and a plain `CreateBooleanUnion` as fallbacks — see the `combined_area` docstring for why. If everything fails, the tool falls back to a plain sum and marks the result with `[union failed — sum shown]`.
 
 ---
 
@@ -281,8 +258,16 @@ Click **Refresh Model** to re-scan all layers and user text keys and update ever
 
 ---
 
+## Migration notes (v0.7 → v0.8)
+
+- Old **S3 (two keys)** → S4 with two `UserText` dimensions.
+- Old **S5** → new S3: sublayer-as-group models work as levels without category layers (objects land in category `—`).
+- Old **R1/R2 data source + target keys** → per-tab dimension pickers + the Settings Target Areas table.
+- v1 config JSONs load with automatic mapping.
+
 ## To-Do
 
 - Silhouette-based footprint for Case B2 (cantilever / overhang solids).
 - Highlight out-of-tolerance objects in the Rhino viewport from R1/R2.
-- Excel export for R1/R2 (room/group analysis results with target comparison).
+- Excel export for R1/R2 (analysis results with target comparison).
+- Optional: a "measured but excluded from totals" category class (e.g. Freifläche reported separately) — see PLAN.md §10.
