@@ -109,6 +109,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 import json
 import System
+import unicodedata
 
 import sys as _sys, os as _os
 _rg_root = _os.path.normpath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
@@ -803,6 +804,22 @@ DIM_CATEGORY = "category"
 DIM_LAYER    = "layer"
 DIM_USERTEXT = "usertext"
 
+# Zero-width/BOM characters that can silently ride along in BIM-exported
+# UserText values without being visible or caught by str.strip().
+_INVISIBLE_CHARS = ("​", "‌", "‍", "﻿")
+
+
+def _clean_label(text):
+    """Normalize a label/UserText value so visually-identical strings from
+    different sources (a layer name vs. an object's UserText field) compare
+    equal even if one picked up invisible characters or a different
+    unicode form of the same accented letters."""
+    if not text:
+        return text
+    for ch in _INVISIBLE_CHARS:
+        text = text.replace(ch, "")
+    return unicodedata.normalize("NFKC", text).strip()
+
 
 def _dim_value(rec, dim, parent_layer):
     """Value of one dimension for a collect_objects record. Missing values
@@ -815,6 +832,7 @@ def _dim_value(rec, dim, parent_layer):
     if kind == DIM_LAYER:
         return _lp.segment_at_depth(parent_layer, rec["layer"], int(arg))
     val = rs.GetUserText(rec["guid"], arg) if arg else None
+    val = _clean_label(val)
     return val or _lp.PLACEHOLDER
 
 
@@ -1202,9 +1220,9 @@ def _draw_bullet_row(g, i, entry, tol, unit, total_w):
                         drawing.RectangleF(chart_x, bar_y,
                                            min(float(mx), chart_w), bar_h))
 
-    # 5. Goal line (2 px)
+    # 5. Goal line (4 px)
     gx = px(goal)
-    g.DrawLine(drawing.Pen(_t.CHART_GOAL, 2.0),
+    g.DrawLine(drawing.Pen(_t.CHART_GOAL, 4.0),
                drawing.PointF(gx, bar_y - 2.0),
                drawing.PointF(gx, bar_y + bar_h + 2.0))
 
@@ -2130,8 +2148,18 @@ class LinderoForm(forms.Form):
         scroll.ExpandContentWidth = True
         scroll.ExpandContentHeight = False
         scroll.Content = layout
+        self._settings_scroll = scroll
         page.Content = scroll
         return page
+
+    def _refresh_targets_layout(self):
+        """Force the Settings Scrollable to re-measure after the target
+        rows list is mutated — Eto's Scrollable caches its content size
+        and does not relayout on its own when a nested StackLayout's
+        Items change (see the DynamicLayout/Scrollable notes above)."""
+        scroll = getattr(self, "_settings_scroll", None)
+        if scroll is not None:
+            scroll.Content = scroll.Content
 
     # ------------------------------------------------------------------
     # Layer dropdown helpers
@@ -2186,6 +2214,7 @@ class LinderoForm(forms.Form):
 
         self._target_rows.append(rec)
         self._targets_layout.Items.Add(forms.StackLayoutItem(row))
+        self._refresh_targets_layout()
 
     def _on_add_target(self, _s, _e):
         self._add_target_row()
@@ -2197,18 +2226,20 @@ class LinderoForm(forms.Form):
             if self._targets_layout.Items[i].Control is rec["row"]:
                 self._targets_layout.Items.RemoveAt(i)
                 break
+        self._refresh_targets_layout()
 
     def _clear_target_rows(self):
         while self._targets_layout.Items.Count > 0:
             self._targets_layout.Items.RemoveAt(0)
         self._target_rows = []
+        self._refresh_targets_layout()
 
     def _targets_dict(self):
         """(targets {label: float}, invalid_count) from the Settings table.
         Decimal commas accepted; blank labels skipped."""
         targets, invalid = {}, 0
         for rec in self._target_rows:
-            label = rec["label_tb"].Text.strip()
+            label = _clean_label(rec["label_tb"].Text)
             raw   = rec["value_tb"].Text.strip().replace(",", ".")
             if not label:
                 continue
