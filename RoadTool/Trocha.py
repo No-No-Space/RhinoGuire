@@ -24,9 +24,17 @@
 #       stored width/thickness (update mode); an untagged curve starts fresh.
 # -> Set width / thickness / sample spacing, click Generate.
 # -> Adjust parameters and Regenerate on the same centerline as needed.
+# -> Picking more than one curve at once (viewport multi-select, or window/
+#    crossing select before clicking Pick/Re-pick) switches to batch mode:
+#    Generate Selected drapes a new road on every picked curve using the
+#    current Width/Thickness/Sample spacing fields; Update Selected re-drapes
+#    just the tagged ones among them with each curve's own stored
+#    width/thickness; Merge Boolean-unions just their built roads into one
+#    solid (deliberately scoped to the pick, not the whole document -
+#    unioning every road in a large file is slow even though most never
+#    touch).
 # -> Remove clears the current road; Update All re-drapes every tagged road
-#    in the document (run after the terrain changes); Merge Boolean-unions
-#    all built roads into one presentation solid.
+#    in the document (run after the terrain changes).
 # _____________________________________________________________________
 # Last update:
 # - [15.07.2026] - 0.1 Initial release
@@ -116,6 +124,7 @@ class TrochaForm(forms.Form):
         self.terrain_id = None
         self.terrain = None
         self.center_id = None
+        self.center_ids = []
 
         self._build_ui()
 
@@ -192,19 +201,54 @@ class TrochaForm(forms.Form):
         self.gen_btn.Click += self.on_generate
         _add(self.gen_btn)
 
-        row = forms.StackLayout()
-        row.Orientation = forms.Orientation.Horizontal
-        row.Spacing = 6
+        _gap()
+        divider = forms.Panel()
+        divider.Height = 1
+        divider.BackgroundColor = _t.TEXT_MUTED
+        _add(divider)
+        _gap()
+
+        _add(_t.lbl("4 — Other actions", _t.F_SANS_B, _t.TEXT))
+
         self.remove_btn = _t.btn("Remove")
         self.remove_btn.Enabled = False
         self.remove_btn.Click += self.on_remove
+        self.generate_selected_btn = _t.btn("Generate Selected")
+        self.generate_selected_btn.Enabled = False
+        self.generate_selected_btn.Click += self.on_generate_selected
+        self.update_selected_btn = _t.btn("Update Selected")
+        self.update_selected_btn.Enabled = False
+        self.update_selected_btn.Click += self.on_update_selected
         self.update_all_btn = _t.btn("Update All")
         self.update_all_btn.Click += self.on_update_all
         self.merge_btn = _t.btn("Merge")
+        self.merge_btn.Enabled = False
         self.merge_btn.Click += self.on_merge
-        for b in (self.remove_btn, self.update_all_btn, self.merge_btn):
-            row.Items.Add(forms.StackLayoutItem(b))
-        _add(row)
+
+        actions_table = forms.TableLayout()
+        actions_table.Spacing = drawing.Size(8, 6)
+        for button, explain in (
+            (self.remove_btn, "Delete the currently picked road and un-tag its centerline."),
+            (self.generate_selected_btn, "Drape a new road on each centerline picked above, using "
+                                          "the Width/Thickness/Sample spacing set above (tagged "
+                                          "ones are replaced)."),
+            (self.update_selected_btn, "Re-drape only the tagged centerlines picked above, each "
+                                        "with its own stored width/thickness."),
+            (self.update_all_btn, "Re-drape every tagged road in the whole document — "
+                                   "use after the terrain changes."),
+            (self.merge_btn, "Boolean-union only the roads of the centerlines picked above "
+                              "into one solid (pick several first — merging the whole document "
+                              "at once is slow)."),
+        ):
+            # Fixed widths (not auto-sized to the unwrapped text) so the label
+            # wraps in place instead of forcing the whole window wider.
+            button.Width = 120
+            explain_lbl = _t.hint(explain)
+            explain_lbl.Width = 250
+            explain_lbl.Wrap = forms.WrapMode.Word
+            actions_table.Rows.Add(forms.TableRow(
+                forms.TableCell(button), forms.TableCell(explain_lbl, True)))
+        _add(actions_table)
 
         _gap()
         self.status_lbl = _t.lbl("Ready — select a terrain to begin.", _t.F_SANS, _t.TEXT_MUTED)
@@ -231,6 +275,9 @@ class TrochaForm(forms.Form):
         self.gen_btn.Enabled = (self.terrain_id is not None) and (self.center_id is not None)
         self.gen_btn.Text = "Regenerate" if (self.center_id and _state.is_road_centerline(self.center_id)) else "Generate"
         self.remove_btn.Enabled = bool(self.center_id and _state.is_road_centerline(self.center_id))
+        self.generate_selected_btn.Enabled = bool(self.center_ids) and (self.terrain_id is not None)
+        self.update_selected_btn.Enabled = bool(self.center_ids)
+        self.merge_btn.Enabled = bool(self.center_ids)
 
     # ------------------------------------------------------------------
     def on_select_terrain(self, sender, e):
@@ -253,12 +300,26 @@ class TrochaForm(forms.Form):
         self._update_buttons()
 
     def on_select_center(self, sender, e):
-        self._status("Pick the centerline curve…")
-        cid = rs.GetObject("Select centerline (tagged = update, untagged = create)",
-                            rs.filter.curve, preselect=True)
-        if cid is None:
+        self._status("Pick the centerline curve(s)…")
+        cids = rs.GetObjects("Select centerline(s) (tagged = update, untagged = create)",
+                              rs.filter.curve, preselect=True)
+        if not cids:
             self._status("Centerline selection cancelled.", "warn")
             return
+
+        if len(cids) > 1:
+            self.center_id = None
+            self.center_ids = list(cids)
+            tagged_count = sum(1 for c in cids if _state.is_road_centerline(c))
+            self.center_info.Text = "%d centerlines selected (%d tagged)." % (len(cids), tagged_count)
+            self.center_info.TextColor = _t.TEXT_OK
+            self._status("Multiple centerlines selected — Generate Selected builds a road on each, "
+                         "Update Selected re-drapes the tagged ones with their own stored params.", "info")
+            self._update_buttons()
+            return
+
+        self.center_ids = []
+        cid = cids[0]
         curve = rs.coercecurve(cid)
         if curve is None:
             self._status("Could not read that curve.", "error")
@@ -381,28 +442,41 @@ class TrochaForm(forms.Form):
         self._status("Road removed.", "ok")
         self._update_buttons()
 
-    def on_update_all(self, sender, e):
-        centerlines = _state.all_tagged_centerlines()
-        if not centerlines:
-            self._status("No tagged roads found in the document.", "warn")
+    def on_generate_selected(self, sender, e):
+        """Drape a fresh road on each picked centerline (road_tool_plan.md create model),
+        using the current Width/Thickness/Sample spacing fields for all of them — unlike
+        Update Selected, which re-uses each centerline's own already-stored params."""
+        if not self.center_ids:
+            self._status("Pick two or more centerlines first (Pick / Re-pick Centerline).", "warn")
             return
-        record = sc.doc.BeginUndoRecord("Trocha: update all roads")
-        updated, skipped = 0, 0
+        if self.terrain_id is None:
+            self._status("Select a terrain first.", "warn")
+            return
         try:
-            for cid in centerlines:
+            width = _positive(self.width_box.Text, "Width")
+            thickness = _positive(self.thick_box.Text, "Thickness")
+            cfg = self._read_config()
+        except ValueError as ex:
+            self._status(str(ex), "error")
+            return
+        if not rs.IsObject(self.terrain_id):
+            self._status("The selected terrain no longer exists — select it again.", "error")
+            return
+
+        ids = [cid for cid in self.center_ids if rs.IsObject(cid)]
+        if not ids:
+            self._status("None of the picked centerlines still exist.", "warn")
+            return
+
+        record = sc.doc.BeginUndoRecord("Trocha: generate selected roads")
+        built, skipped = 0, 0
+        try:
+            for cid in ids:
                 curve = rs.coercecurve(cid)
-                width, thickness, terrain_id = _state.read_params(cid)
-                if curve is None or width is None or thickness is None \
-                        or not terrain_id or not rs.IsObject(terrain_id):
+                if curve is None:
                     skipped += 1
                     continue
-                try:
-                    terrain_model = _terrain.TerrainModel(terrain_id)
-                except Exception:
-                    skipped += 1
-                    continue
-                cfg = _config.TrochaConfig(tolerance=sc.doc.ModelAbsoluteTolerance)
-                result = _geometry.build_slab(curve, terrain_model, width, thickness, cfg)
+                result = _geometry.build_slab(curve, self.terrain, width, thickness, cfg)
                 if result.brep is None:
                     skipped += 1
                     continue
@@ -410,9 +484,73 @@ class TrochaForm(forms.Form):
                 if old_child and rs.IsObject(old_child):
                     rs.DeleteObject(old_child)
                 slab_id = _add_brep_to_layer(result.brep, _config.DEFAULT_LAYER, name="Trocha road")
-                _state.write_centerline_tags(cid, width, thickness, str(terrain_id), str(slab_id))
+                _state.write_centerline_tags(cid, width, thickness, str(self.terrain_id), str(slab_id))
                 _state.write_slab_tag(slab_id, cid)
-                updated += 1
+                built += 1
+        finally:
+            sc.doc.EndUndoRecord(record)
+        sc.doc.Views.Redraw()
+        self._status("Generated %d road(s), skipped %d." % (built, skipped),
+                      "ok" if built else "warn")
+        self._update_buttons()
+
+    def _regenerate_centerlines(self, centerlines):
+        """Re-drape each of *centerlines* using its own stored width/thickness/
+        terrain (road_tool_plan.md create<->update model). Returns (updated, skipped)."""
+        updated, skipped = 0, 0
+        for cid in centerlines:
+            curve = rs.coercecurve(cid)
+            width, thickness, terrain_id = _state.read_params(cid)
+            if curve is None or width is None or thickness is None \
+                    or not terrain_id or not rs.IsObject(terrain_id):
+                skipped += 1
+                continue
+            try:
+                terrain_model = _terrain.TerrainModel(terrain_id)
+            except Exception:
+                skipped += 1
+                continue
+            cfg = _config.TrochaConfig(tolerance=sc.doc.ModelAbsoluteTolerance)
+            result = _geometry.build_slab(curve, terrain_model, width, thickness, cfg)
+            if result.brep is None:
+                skipped += 1
+                continue
+            old_child = _state.resolve_child(cid)
+            if old_child and rs.IsObject(old_child):
+                rs.DeleteObject(old_child)
+            slab_id = _add_brep_to_layer(result.brep, _config.DEFAULT_LAYER, name="Trocha road")
+            _state.write_centerline_tags(cid, width, thickness, str(terrain_id), str(slab_id))
+            _state.write_slab_tag(slab_id, cid)
+            updated += 1
+        return updated, skipped
+
+    def on_update_selected(self, sender, e):
+        if not self.center_ids:
+            self._status("Select two or more centerlines first (Pick / Re-pick Centerline).", "warn")
+            return
+        live = [cid for cid in self.center_ids if rs.IsObject(cid)]
+        tagged = [cid for cid in live if _state.is_road_centerline(cid)]
+        if not tagged:
+            self._status("None of the selected centerlines are tagged roads.", "warn")
+            return
+        record = sc.doc.BeginUndoRecord("Trocha: update selected roads")
+        try:
+            updated, skipped = self._regenerate_centerlines(tagged)
+        finally:
+            sc.doc.EndUndoRecord(record)
+        sc.doc.Views.Redraw()
+        skipped += len(self.center_ids) - len(tagged)
+        self._status("Updated %d road(s), skipped %d." % (updated, skipped),
+                      "ok" if updated else "warn")
+
+    def on_update_all(self, sender, e):
+        centerlines = _state.all_tagged_centerlines()
+        if not centerlines:
+            self._status("No tagged roads found in the document.", "warn")
+            return
+        record = sc.doc.BeginUndoRecord("Trocha: update all roads")
+        try:
+            updated, skipped = self._regenerate_centerlines(centerlines)
         finally:
             sc.doc.EndUndoRecord(record)
         sc.doc.Views.Redraw()
@@ -420,27 +558,42 @@ class TrochaForm(forms.Form):
                       "ok" if updated else "warn")
 
     def on_merge(self, sender, e):
+        # Scoped to the picked centerlines (not the whole document): a Boolean
+        # union over every tagged road in a large file is heavy even though
+        # most of those roads never touch each other. Picking the handful
+        # that actually need merging keeps CreateBooleanUnion's input small.
+        if not self.center_ids:
+            self._status("Pick two or more centerlines first (Pick / Re-pick Centerline), then Merge.", "warn")
+            return
+        tagged = [cid for cid in self.center_ids if rs.IsObject(cid) and _state.is_road_centerline(cid)]
         slab_ids = []
-        for cid in _state.all_tagged_centerlines():
+        for cid in tagged:
             sid = _state.resolve_child(cid)
             if sid and rs.IsObject(sid):
                 slab_ids.append(sid)
         if len(slab_ids) < 2:
-            self._status("Need at least two built roads to merge.", "warn")
+            self._status("Need at least two built roads among the picked centerlines to merge.", "warn")
             return
         breps = [b for b in (rs.coercebrep(sid) for sid in slab_ids) if b is not None]
 
-        record = sc.doc.BeginUndoRecord("Trocha: merge roads")
+        record = sc.doc.BeginUndoRecord("Trocha: merge selected roads")
         try:
             merged, ok = _junctions.merge_slabs(breps, sc.doc.ModelAbsoluteTolerance)
             if not ok:
                 self._status("Boolean union failed — roads left unmerged.", "warn")
                 return
-            for oid in [o for o in rs.AllObjects() if rs.GetUserText(o, _config.TAG_MERGED) == "1"]:
-                rs.DeleteObject(oid)
+            source_ids = set(str(cid) for cid in tagged)
+            for oid in rs.AllObjects():
+                if rs.GetUserText(oid, _config.TAG_MERGED) != "1":
+                    continue
+                prior_sources = (rs.GetUserText(oid, _config.TAG_MERGE_SOURCES) or "").split("|")
+                if source_ids.intersection(prior_sources):
+                    rs.DeleteObject(oid)
+            sources_tag = "|".join(sorted(source_ids))
             for brep in merged:
                 mid = _add_brep_to_layer(brep, _config.MERGED_LAYER, name="Trocha merged road")
                 rs.SetUserText(mid, _config.TAG_MERGED, "1")
+                rs.SetUserText(mid, _config.TAG_MERGE_SOURCES, sources_tag)
         finally:
             sc.doc.EndUndoRecord(record)
         sc.doc.Views.Redraw()
