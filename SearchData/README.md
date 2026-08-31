@@ -1,6 +1,17 @@
 # Baquiano — Search Data
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **Baquiano** (`RG_Baquiano`) |
+| **Category** | Object Search & Filtering / Selection Queries |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | Pure RhinoCommon (Zero external dependencies) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_baquiano.py"` |
+| **Input** | Whole model or pre-selected Rhino objects |
+| **Output** | Active viewport selection of matching objects + query summary |
+
 Search and select Rhino objects by their User Keys/Values using include/exclude conditions.
+
 
 ## Search Scope
 

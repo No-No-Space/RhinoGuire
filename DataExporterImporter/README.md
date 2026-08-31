@@ -1,6 +1,17 @@
 # Arriero — Data Exporter/Importer
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **Arriero** (`RG_Arriero`) |
+| **Category** | BIM Metadata Management (Rhino ↔ Excel) |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | `openpyxl` (auto-installed via `# r: openpyxl`) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_arriero.py"` |
+| **Input** | Rhino Objects with User Text metadata / Excel spreadsheets (`.xlsx`) |
+| **Output** | Synchronized Rhino metadata, backup export (`.xlsx`), change report |
+
 Export and import object metadata (User Keys/Values) between Rhino 8 and Excel files using GUID-based tracking.
+
 
 ## Workflow
 

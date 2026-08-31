@@ -1,62 +1,61 @@
-# RhinoGuire Toolbar (ui/)
+# RhinoGuire Toolbar (`ui/`)
 
 ## Files
-- `RhinoGuire.rui` — Rhino toolbar (generated from Rhino, see instructions below)
+- `RhinoGuire.rui` — Rhino toolbar file (customized toolbar definition). Note: `.rui` files contain local paths; see instructions below to build or load your toolbar.
+- `theme.py` — Shared UI design system, colors, fonts, and styling helpers for all Eto.Forms windows.
+- `InfoAboutIcons.txt` — Icon reference sources and guidance.
 
 ---
 
-## Creating the toolbar for the first time
+## Creating the Toolbar
 
-### 1. Install the scripts
-Open Rhino and run in the Python editor (adjust to where you cloned the repo):
-```
-_RunPythonScript "<path-to-repo>/RhinoGuire/install.py"
-```
-
-### 2. Create the toolbar
-In Rhino: `Tools > Toolbar Layout > New`
+### 1. Load or Create Toolbar in Rhino 8
+In Rhino 8: `Tools > Toolbar Layout... > New...`
 - Name: `RhinoGuire`
 
-### 3. Add a button per script
-Right-click on the toolbar > `New Button` for each tool.
+### 2. Add Buttons
+Right-click the newly created toolbar > **New Button** for each tool.
 
-**Left button macro (run):**
+**Recommended button macro (using direct root launcher shims):**
+```text
+! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_<toolname>.py"
 ```
-! _RunPythonScript "<path-to-repo>/RhinoGuire/launch.py" "RG_Lindero"
+
+*Example for Lindero:*
+```text
+! _-RunPythonScript "D:/404-Github/008-RhinoGuire/RhinoGuire/launch_lindero.py"
 ```
 
-**Available buttons:**
+**Alternative button macro (via central `launch.py` dispatcher):**
+```text
+! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch.py" "<ToolName>"
+```
 
-| Label         | Script Key        | Description                 |
-|---------------|-------------------|-----------------------------|
-| Lindero       | RG_Lindero        | Area Measurer               |
-| Arriero       | RG_Arriero        | Data Exporter/Importer      |
-| Chivito       | RG_Chivito        | Data Visualization          |
-| Sebucan       | RG_Sebucan        | Wrap Mesh on Mesh           |
-| Baquiano      | RG_Baquiano       | Search Data                 |
-| PadGrader     | RG_PadGrader      | TerrainTools — building pad grading   |
-| WayGrader     | RG_WayGrader      | TerrainTools — way/path corridor grading |
-| CutFillReport | RG_CutFillReport  | TerrainTools — cut/fill compare & export |
+### 3. Available Tools & Button Mappings
 
-> **TerrainTools buttons.** The three TerrainTools above can also be launched
-> with the dedicated root shims (mirrors the other tools), which avoids passing
-> a script key:
-> ```
-> ! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_padgrader.py"
-> ! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_waygrader.py"
-> ! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_cutfillreport.py"
-> ```
-> CutFillReport needs `openpyxl` for Excel export — Rhino installs it
-> automatically from the `# r: openpyxl` header on first run.
+| Label | Script Key / Dispatcher | Dedicated Launcher Shim | Description |
+| :--- | :--- | :--- | :--- |
+| **Lindero** | `Lindero` | `launch_lindero.py` | Area & Footprint Calculator (XY Plan Projection) |
+| **Arriero** | `Arriero` | `launch_arriero.py` | Metadata Exporter / Importer (Rhino ↔ Excel) |
+| **Chivito** | `Chivito` | `launch_chivito.py` | Metadata Color-Coder & Visualizer |
+| **Baquiano** | `Baquiano` | `launch_baquiano.py` | Metadata Query & Object Selector |
+| **Pregonero** | `Pregonero` | `launch_pregonero.py` | Live-Field Object Tagger & Leader Generator |
+| **Sebucan** | `Sebucan` | `launch_sebucan.py` | Wrap Mesh on Mesh (Z-Projection Engine) |
+| **PadGrader** | `PadGrader` | `launch_padgrader.py` | Terrain Grading — Building Pads |
+| **WayGrader** | `WayGrader` | `launch_waygrader.py` | Terrain Grading — Way / Path Corridors |
+| **CutFillReport** | `CutFillReport` | `launch_cutfillreport.py` | Cut & Fill Volume Quantification & Excel Export |
+| **Trocha** | `Trocha` | `launch_trocha.py` | Solid Road Slab Draped on Terrain |
 
-### 4. Save the toolbar
-`File > Save As` → save as `RhinoGuire/ui/RhinoGuire.rui`
+> **Dependencies:** `Arriero`, `Chivito`, and `CutFillReport` require `openpyxl` for Excel export. Rhino 8 installs it automatically on first run via the `# r: openpyxl` header.
+
+### 4. Save the Toolbar
+In Rhino: `File > Save As...` → save as `RhinoGuire/ui/RhinoGuire.rui`.
 
 ---
 
-## For colleagues (installation)
+## Quick Setup for Team Members
 
-1. Clone or copy the repo
-2. Edit `install.py` if your local path differs
-3. Run `install.py` from the Rhino Python editor
-4. `Tools > Toolbar Layout > Open > ui/RhinoGuire.rui`
+1. Clone or copy the `008-RhinoGuire/RhinoGuire` repository folder.
+2. In Rhino 8, run tools directly with `RunPythonScript` on any `launch_<name>.py` file.
+3. To load the toolbar: `Tools > Toolbar Layout... > File > Open...` → Select `ui/RhinoGuire.rui`.
+

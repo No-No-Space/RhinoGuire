@@ -1,14 +1,23 @@
 # TerrainTools — Terrain Grading Suite
 
+| Specification | Details |
+| :--- | :--- |
+| **Suite Name** | **TerrainTools** |
+| **Tools Included** | [PadGrader](PadGrader/) · [WayGrader](WayGrader/) · [CutFillReport](CutFillReport/) |
+| **Shared Engine** | `TerrainTools/_core` (heightfield sampling, slope conversions, grid-prism volumes) |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | Pure RhinoCommon (Excel export in CutFillReport uses `openpyxl`) |
+| **Launchers** | `launch_padgrader.py` · `launch_waygrader.py` · `launch_cutfillreport.py` |
+
 > **Status:** v0.1 implemented. The shared `_core` engine and all three tools
 > (PadGrader, WayGrader, CutFillReport) are built and registered in `launch.py`
-> with root launch shims. The WIP names are still in use (see D8). See
-> [`PLAN.md`](PLAN.md) for the implementation plan and [`DECISIONS.md`](DECISIONS.md)
-> for the decision log (open questions resolved at the bottom).
+> with root launch shims. See [`PLAN.md`](PLAN.md) for the implementation plan
+> and [`DECISIONS.md`](DECISIONS.md) for the decision log.
 >
 > Headless tests for the RhinoCommon-free engine parts (slope conversions and
 > grid-prism volumes) live in [`_core/tests/test_headless.py`](_core/tests/test_headless.py)
 > and run under plain CPython: `python TerrainTools/_core/tests/test_headless.py`.
+
 
 A suite of Rhino 8 (CPython 3) tools for **modifying terrains** modelled as
 Surfaces or Meshes. The suite lets the user place **building pads** and

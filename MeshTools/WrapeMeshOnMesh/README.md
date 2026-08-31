@@ -1,6 +1,17 @@
 # Sebucan — Wrap Mesh on Mesh
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **Sebucan** (`RG_Sebucan`) |
+| **Category** | Mesh Operations & Z-Projection / Terrain Conformation |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | Pure RhinoCommon (Zero external dependencies) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_sebucan.py"` |
+| **Input** | Source Meshes + Destination (Mesh, SubD, Surface, Polysurface, Solid) |
+| **Output** | New conforming mesh draped onto destination with adaptive refinement |
+
 Projects one or more source meshes onto a destination surface along the Z axis. Every source vertex keeps its X/Y position and its Z is snapped to the destination. An optional adaptive refinement pass splits coarse faces where terrain detail between vertices would otherwise be lost.
+
 
 **Typical use case:** road or path meshes that need to follow the contours of a terrain mesh, SubD landscape, or solid polysurface.
 

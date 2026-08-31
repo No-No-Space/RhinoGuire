@@ -1,5 +1,15 @@
 # Trocha — Road on Terrain
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **Trocha** (`RG_Trocha`) |
+| **Category** | Road Infrastructure & 3D Draping (Non-destructive) |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | Pure RhinoCommon (Zero external dependencies) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_trocha.py"` |
+| **Input** | Centerline Curve + Terrain (Mesh, SubD, Surface, Polysurface) |
+| **Output** | 3D Solid road slab, create→update links, Boolean-union merged solid |
+
 Drapes a solid road slab onto a terrain from a user-drawn centerline, in a
 **persistent window**: pick, set width/thickness, and Generate. The top face
 is a clean, crease-free surface; the slab is buried deep enough into the
@@ -8,6 +18,7 @@ never modified. Create → update is linked to the centerline, so re-running
 replaces the slab instead of duplicating it.
 
 Full design spec: [`road_tool_plan.md`](road_tool_plan.md).
+
 
 ## Workflow
 

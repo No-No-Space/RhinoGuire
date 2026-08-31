@@ -1,6 +1,17 @@
 # Chivito — Data Visualization
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **Chivito** (`RG_Chivito`) |
+| **Category** | Metadata-Driven 3D Color Visualization |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | `openpyxl` (auto-installed via `# r: openpyxl`) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_chivito.py"` |
+| **Input** | Rhino Objects with User Text metadata / Color Mapping Excel (`.xlsx`) |
+| **Output** | Color-coded 3D viewport, Legend PNG export, Viewport capture PNG |
+
 Color-code Rhino objects based on their metadata values. Three-step workflow: initialize keys, extract unique values, then visualize with an interactive Color Manager.
+
 
 ## Workflow
 

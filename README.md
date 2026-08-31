@@ -1,83 +1,164 @@
 # RhinoGuire
 
-A collection of Python 3 tools for managing object metadata and geometry in Rhino 8.
+A collection of high-performance Python 3 tools for Rhino 8 for managing BIM metadata, architectural footprint calculations, live-field tagging, mesh projection, road draping, and terrain grading (cut & fill earthwork).
 
-## Tools
+---
 
-### [Arriero](DataExporterImporter/) — Data Exporter/Importer
+## 🧭 Tool Suite Overview
 
-Export and import object metadata between Rhino and Excel files using GUID-based tracking. Supports backup creation, key creation scope, and flexible handling of empty cells.
+| Tool | Category | Input Geometry / Data | Output | Extra Dependencies | Launcher |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| [**Lindero**](AreaMeasurer/) | Area & Space Planning | Solids, Extrusions, Curves, Surfaces, Hatches | Footprint plan area, matrix breakdown, Excel & PNG | None | `launch_lindero.py` |
+| [**Arriero**](DataExporterImporter/) | Metadata Management | Rhino Objects with User Text | Two-way Excel sync (`.xlsx`) | `openpyxl` | `launch_arriero.py` |
+| [**Chivito**](DataVisualization/) | Data Visualization | User Text Metadata & Excel Color Map | Color-coded Rhino viewports & legend export | `openpyxl` | `launch_chivito.py` |
+| [**Baquiano**](SearchData/) | Search & Filtering | Document or pre-selected objects | Viewport selection via 8 condition match types | None | `launch_baquiano.py` |
+| [**Pregonero**](Tagging/) | Annotation & BIM Tagging | Rhino Objects with User Text | Dynamic leaders with live `%<UserText(...)>%` fields | None | `launch_pregonero.py` |
+| [**Sebucan**](MeshTools/WrapeMeshOnMesh/) | Mesh Operations | Source Meshes + Destination Terrain / Surface | Wrapped mesh with adaptive Z-refinement | None | `launch_sebucan.py` |
+| [**PadGrader**](TerrainTools/PadGrader/) | Terrain Grading | Closed Planar Curves + Terrain | Graded terrain mesh + cut/fill quantities | None | `launch_padgrader.py` |
+| [**WayGrader**](TerrainTools/WayGrader/) | Terrain Grading | Centerline Polyline + Terrain | Graded corridor mesh + mass-haul station data | None | `launch_waygrader.py` |
+| [**CutFillReport**](TerrainTools/CutFillReport/) | Earthwork Reporting | Two Terrains or grading result | KPI dashboard, depth tinted map, Excel & PNG | `openpyxl` | `launch_cutfillreport.py` |
+| [**Trocha**](RoadTool/) | Road Infrastructure | Centerline Curve + Terrain | Continuous solid road slab (non-destructive) | None | `launch_trocha.py` |
 
-### [Chivito](DataVisualization/) — Data Visualization
+---
 
-Color-code Rhino objects based on their metadata values. Three-step workflow: initialize keys from Excel, extract unique values, and visualize with an interactive Color Manager. Includes legend and viewport PNG export.
-
-### [Baquiano](SearchData/) — Search Data
-
-Search and select Rhino objects by their metadata using include/exclude conditions with 8 match types (Contains, Equals, Starts with, Ends with, and their negations). Supports pre-selection filtering and cross-search queries.
-
-### [Pregonero](Tagging/) — Object Tagger
-
-Tag objects with leaders built from a reusable text template, like Revit's *tag by category* tool. Template placeholders (`{KeyName}`) are inserted as **live Rhino text fields** (`%<UserText("guid","Key")>%`), so each leader reflects the tagged object's own user text and updates when it changes. Pick a template object to load its keys, write the template, choose a Dimension Style and optional text height, then click objects to tag (first click sets the arrow, second sets the text). Keys an object is missing are created with the value `TBD`. Modeless window; one Undo per session.
+## 🛠️ Tool Details
 
 ### [Lindero](AreaMeasurer/) — Footprint Area Calculator
+Calculates the **footprint area** of Rhino objects — the true plan area as seen from directly above (XY projection), distinct from Rhino's built-in `Area` command which sums all 3D faces.
+- **S1 (Selected Objects) & S2 (By Layer):** Merges overlapping footprints per layer/Z-band to avoid double-counting.
+- **S3 (Layer Hierarchy):** Traverses the layer tree (`Parent → Level → Category`) to produce Gross Floor Area (GFA) aggregations and cross-category overlap warnings.
+- **S4 (Custom Aggregation):** Flexible N-level hierarchy built from layer-path depths and User Text keys.
+- **R1 / R2 (Target Analysis):** Evaluates measured areas against target schedules as bullet charts with customizable tolerance bands.
+- **Exports:** Excel workbooks (pivot-ready sheets and Level × Category matrices) and bullet charts as PNG.
 
-Calculates the **footprint area** of Rhino objects — the plan area as seen from directly above (XY projection), distinct from Rhino's built-in `Area` command which sums all faces.
+### [Arriero](DataExporterImporter/) — Metadata Exporter & Importer
+Two-way synchronization between Rhino User Text and Excel spreadsheets using GUID tracking.
+- **Export:** Dumps all object GUIDs and key/value pairs into clean, structured spreadsheets.
+- **Import:** Updates existing metadata, automatically adds missing keys from new columns, supports customizable empty-cell handling (preserve, set placeholder, or delete key), and generates automatic timestamped backups before updating.
 
-Runs as a modeless window with six calculation tabs:
+### [Chivito](DataVisualization/) — Metadata Color Visualizer
+Color-codes Rhino objects based on metadata values through an interactive, modeless Color Manager.
+- **3-Step Workflow:** (1) Initialize keys from template Excel, (2) Scan and export unique values to a color mapping spreadsheet, (3) Apply interactive colors in the viewport.
+- **Diagnostics & Output:** Identifies unmapped or missing values with a "Select Problem Objects" diagnostic tool; exports standalone legends and viewports to PNG.
 
-- **S1 — Selected Objects:** individual footprint per object; overlapping footprints merged to avoid double-counting.
-- **S2 — By Layer:** footprints of all objects on a layer, overlaps merged.
-- **S3 — Layer Hierarchy:** reads the layer tree — parent → direct children = levels (floors) → the object's own layer = category (e.g. DIN 13080 areas). Layers prefixed `_` are ignored with their whole subtree; a dry-run preview shows what counts before calculating. Union per (level, category), cross-category overlap warned per level, grand total per Gross Floor Area logic.
-- **S4 — Custom Aggregation:** user-defined hierarchy of dimensions, each either a layer-path depth or a user text key (e.g. Layer @ 1 → Layer @ 2, or Domain → Room Type). Footprints merged per leaf group per level, summed across levels.
-- **R1 / R2 — Analysis:** aggregate merged areas by category, level, or a user text key across all floors and compare against a target table (Settings). Displayed as bullet charts with tolerance bands.
+### [Baquiano](SearchData/) — Search & Select Objects by Metadata
+Search and isolate Rhino objects across your model using boolean include/exclude query rules.
+- **Flexible Matching:** 8 match types (`Contains`, `Equals`, `Starts with`, `Ends with`, and their negations).
+- **Scope:** Search across the whole model or restrict queries to pre-selected candidate objects.
 
-Accepted geometry: solids, extrusions, closed planar curves, planar surfaces, and hatches. Supports labelling via user text keys, configurable decimal places, Write Area to Objects, Excel export (S1–S4, S3 as a Level × Category matrix), and PNG chart export (R1–R2).
+### [Pregonero](Tagging/) — Live-Field Object Tagger
+Creates annotation leaders driven by reusable text templates, similar to BIM "tag by category" workflows.
+- **Live Text Fields:** Placeholders (`{KeyName}`) are inserted as live Rhino text fields (`%<UserText("guid","Key")>%`), automatically staying up-to-date if object metadata changes.
+- **Missing Key Safety:** Keys missing on tagged objects are initialized with `TBD` to prevent broken field markers (`####`).
 
 ### [Sebucan](MeshTools/WrapeMeshOnMesh/) — Wrap Mesh on Mesh
+Projects source meshes vertically onto any target geometry along the Z axis (Mesh, SubD, Surface, Polysurface, or Solid).
+- **Adaptive Refinement:** Automatically subdivides coarse faces only where terrain curvature exceeds a user-defined tolerance.
 
-Projects one or more source meshes onto a destination surface along the Z axis. Every source vertex keeps its X/Y position and its Z is snapped to the destination geometry.
+### [TerrainTools](TerrainTools/) — Terrain Grading & Earthwork Suite
+A unified suite sharing a fast heightfield grading engine (`_core`) for **modifying site terrain** without altering the original geometry:
+- **[PadGrader](TerrainTools/PadGrader/):** Grades building pads (closed boundary curves at target elevations) out to the terrain daylight line along custom cut/fill slopes.
+- **[WayGrader](TerrainTools/WayGrader/):** Grades road/path corridors from centerlines with crown or single crossfall, daylight skirts, and station-by-station mass-haul tracking.
+- **[CutFillReport](TerrainTools/CutFillReport/):** Compares original vs. modified surfaces, computes cut/fill net balance, renders a tinted depth mesh, and exports KPI reports to Excel and PNG.
+- *Documentation:* See [`PLAN.md`](TerrainTools/PLAN.md) and [`DECISIONS.md`](TerrainTools/DECISIONS.md).
 
-Accepted destination types: Mesh, SubD, Surface, Polysurface, Solid. Includes an **adaptive refinement** pass that splits coarse faces only where terrain Z deviation between vertices exceeds a configurable tolerance — flat areas produce no extra geometry.
+### [Trocha](RoadTool/) — Solid Road Slab on Terrain
+Drapes a clean, crease-free solid road slab onto terrain from a 3D centerline **without modifying the terrain** (non-destructive presentation and documentation tool).
+- **Contact Rule:** Sinks the slab underside into the ground so roads never "fly" over dips, while keeping the top face smooth.
+- **Junction Merge:** Boolean-unions intersecting road slabs on demand while keeping source centerlines editable.
+- *Documentation:* See [`README.md`](RoadTool/README.md) and the complete [Design Spec (`road_tool_plan.md`)](RoadTool/road_tool_plan.md).
 
-Typical use case: road or path meshes that need to follow the contours of a terrain mesh or landscape surface.
+---
 
-### [TerrainTools](TerrainTools/) — Terrain Grading Suite
+## 💻 Requirements & Dependencies
 
-A suite of three tools sharing one grading engine (`_core`) for **modifying terrains** modelled as Surfaces or Meshes. The terrain is sampled with the same Z-projection technique as Sebucan; grading is computed analytically on a regular heightfield (cut/fill slopes auto-stop at the daylight line). All outputs are new meshes — the original terrain is never modified.
+- **Platform:** Rhino 8 for Windows (CPython 3 runtime).
+- **Dependencies:**
+  - `openpyxl` — Required only for Excel exports in **Arriero**, **Chivito**, and **CutFillReport**. Rhino 8 installs this automatically via the `# r: openpyxl` script header on first run.
+  - All other tools (**Lindero**, **Baquiano**, **Pregonero**, **Sebucan**, **PadGrader**, **WayGrader**, **Trocha**) use pure RhinoCommon and standard Python with **zero external dependencies**.
 
-- **PadGrader** — place one or more building pads (closed boundaries at a target elevation) and grade cut/fill slopes around them to daylight. Outputs a graded mesh + cut/fill totals.
-- **WayGrader** — grade a way/path corridor from its centerline in a persistent window: width, crossfall (crown/single), cut/fill slopes; Regenerate without re-picking. Outputs a graded corridor mesh + per-station mass-haul.
-- **CutFillReport** — compare original vs modified terrain (or read the last grading), compute cut & fill volumes, show KPIs/charts, tint a cut/fill map mesh with a legend, and export to **Excel** and **PNG**.
+---
 
-Slopes accept H:V ratio, percent, or degrees. See [`TerrainTools/`](TerrainTools/) for the design docs (`README.md`, `PLAN.md`, `DECISIONS.md`).
+## 🚀 Quick Start
 
-### [Trocha](RoadTool/) — Road on Terrain
+### Method 1: Run via Command Line / Script Editor
+1. In Rhino 8, run `_-RunPythonScript`.
+2. Browse to any launcher shim in the `RhinoGuire/` root:
+   - `launch_lindero.py`
+   - `launch_arriero.py`
+   - `launch_chivito.py`
+   - `launch_baquiano.py`
+   - `launch_pregonero.py`
+   - `launch_sebucan.py`
+   - `launch_padgrader.py`
+   - `launch_waygrader.py`
+   - `launch_cutfillreport.py`
+   - `launch_trocha.py`
 
-Drapes a solid road slab onto a terrain from a user-drawn centerline, **without modifying the terrain** — distinct from TerrainTools, which grades/modifies the terrain itself. A persistent window: pick terrain + centerline, set width/thickness, Generate. The top face stays a single clean surface; the slab is buried deep enough into the terrain that it never lifts off over a dip. Create → update is linked to the centerline (re-running replaces, not duplicates), with an Update All sweep and a Merge step that Boolean-unions built roads at junctions.
+### Method 2: Load the Rhino Toolbar
+Load `ui/RhinoGuire.rui` into Rhino 8 for one-click toolbar access. See the [Toolbar Setup Guide](ui/README.md) for full configuration steps.
 
-See [`RoadTool/`](RoadTool/) for the workflow (`README.md`) and full design spec (`road_tool_plan.md`).
+---
 
-## Requirements
+## 📂 Repository Directory Layout
 
-- **Rhino 8** with CPython 3
-- **openpyxl** — required by Arriero, Chivito and CutFillReport (installed automatically via `# r: openpyxl` header)
-- Baquiano, Pregonero, Lindero, Sebucan, PadGrader, WayGrader and Trocha have no external dependencies
+```text
+RhinoGuire/
+├── AreaMeasurer/               ← Lindero (Footprint Area Calculator & GFA Matrix)
+│   ├── Lindero.py              ← Modeless Eto application
+│   ├── _paths.py               ← Headless layer-hierarchy path resolution engine
+│   ├── PLAN.md                 ← Architecture & design specification
+│   └── tests/                  ← Unit tests (test_paths.py)
+├── DataExporterImporter/       ← Arriero (Rhino ↔ Excel metadata synchronization)
+├── DataVisualization/          ← Chivito (Metadata color-coding & legend visualizer)
+├── MeshTools/WrapeMeshOnMesh/  ← Sebucan (Z-projection & adaptive mesh refinement)
+├── RoadTool/                   ← Trocha (Solid road draping on terrain)
+│   ├── Trocha.py               ← Modeless Eto application
+│   ├── _core/                  ← Geometry engine, configuration, state & junctions
+│   ├── road_tool_plan.md       ← Full technical design specification
+│   └── tests/                  ← Headless unit tests (test_headless.py)
+├── SearchData/                 ← Baquiano (Multi-condition metadata query & selection)
+├── Tagging/                    ← Pregonero (Live-field BIM leader annotations)
+├── TerrainTools/               ← Terrain grading suite (PadGrader, WayGrader, CutFillReport)
+│   ├── _core/                  ← Shared grading engine, terrain raycaster & volumes
+│   ├── _widgets.py             ← Reusable slope and UI controls
+│   ├── DECISIONS.md            ← Architecture decision record
+│   ├── PLAN.md                 ← Implementation roadmap
+│   └── tests/                  ← Headless unit tests (test_headless.py)
+├── ui/                         ← Theme definitions, color palettes & toolbar RUI
+│   ├── theme.py                ← Central Eto styling design system
+│   └── RhinoGuire.rui          ← Toolbar definition
+├── launch.py                   ← Central script dispatcher
+├── launch_*.py                 ← Dedicated root shims for each tool
+├── manifest.yml                ← Yak package manager metadata
+├── .gitignore / .yakignore     ← Git and Yak package filter definitions
+└── README.md                   ← Main repository documentation
+```
 
-## Quick Start
+---
 
-1. Open Rhino 8
-2. Type `RunPythonScript` in the command line
-3. Navigate to the desired tool's `.py` file and click **Open**
+## 🧪 Running Headless Tests
 
-Each tool opens its own GUI window. See the individual README files for detailed usage instructions.
+All headless geometry, slope conversion, volume prism, and layer path logic can be tested without Rhino running:
 
-Alternatively, load the toolbar bundle (`ui/RhinoGuire.rui`) for one-click access from the Rhino interface — see [`ui/README.md`](ui/README.md) for setup instructions.
+```bash
+# Test Lindero layer-hierarchy logic
+python AreaMeasurer/tests/test_paths.py
 
-## License
+# Test TerrainTools slope & volume engine
+python TerrainTools/_core/tests/test_headless.py
+
+# Test Trocha road configuration & parameter derivation
+python RoadTool/_core/tests/test_headless.py
+```
+
+---
+
+## 📄 License
 
 MIT License — see [LICENSE](LICENSE) for details.
 
-## Author
+## 👤 Author
 
-Aquelon — aquelon@pm.me
+**Aksel Alvarez** — [aquelon@pm.me](mailto:aquelon@pm.me)
+

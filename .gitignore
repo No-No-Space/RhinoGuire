@@ -190,3 +190,11 @@ ui/RhinoGuire.rui
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Affinity files & lock files
+*.af
+*.afdesign
+*.afphoto
+*.afpub
+*~lock~
+*.af*~lock~

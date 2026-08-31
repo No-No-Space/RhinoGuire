@@ -1,9 +1,21 @@
 # CutFillReport — Compare · Quantify · Export
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **CutFillReport** (`RG_CutFillReport`) |
+| **Suite** | [TerrainTools](../README.md) |
+| **Category** | Earthwork Volume Quantification & Analysis Dashboard |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | `openpyxl` (auto-installed via `# r: openpyxl`) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_cutfillreport.py"` |
+| **Input** | Original vs. Modified Terrains, or handover from PadGrader/WayGrader |
+| **Output** | Cut/Fill KPIs, Depth-Tinted Mesh + Legend, Excel (.xlsx) & Chart PNG |
+
 Part of the **TerrainTools** suite. Compares an **original** vs a **modified**
 terrain (or reads the last PadGrader / WayGrader result), computes **cut & fill
 volumes**, shows KPIs and charts, builds a cut/fill-tinted **map mesh** with a
 legend, and exports the numbers to **Excel** and the charts to **PNG**.
+
 
 > Requires **openpyxl** for Excel export — Rhino installs it automatically from
 > the `# r: openpyxl` header on first run.

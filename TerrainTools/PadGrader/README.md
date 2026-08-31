@@ -1,9 +1,21 @@
 # PadGrader — Building Pad Grading
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **PadGrader** (`RG_PadGrader`) |
+| **Suite** | [TerrainTools](../README.md) |
+| **Category** | Earthwork Site Design / Building Pad Grading |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | Pure RhinoCommon (Zero external dependencies) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_padgrader.py"` |
+| **Input** | Closed Planar Curve(s) + Terrain (Mesh, SubD, Surface, Polysurface) |
+| **Output** | New graded terrain mesh, cut/fill volumes, handover to CutFillReport |
+
 Part of the **TerrainTools** suite. Places one or more building pads (closed
 planar boundaries at a target elevation) on a terrain and grades cut/fill
 slopes around them down to the daylight line. Outputs a **new graded mesh** on a
 separate layer — the original terrain is never modified.
+
 
 ## Workflow
 

@@ -1,9 +1,21 @@
 # WayGrader — Way / Path Corridor Grading
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **WayGrader** (`RG_WayGrader`) |
+| **Suite** | [TerrainTools](../README.md) |
+| **Category** | Earthwork Site Design / Road & Path Corridor Grading |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | Pure RhinoCommon (Zero external dependencies) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_waygrader.py"` |
+| **Input** | Centerline Polyline/Curve + Terrain (Mesh, SubD, Surface, Polysurface) |
+| **Output** | Graded corridor mesh, per-station mass-haul, handover to CutFillReport |
+
 Part of the **TerrainTools** suite. Grades a way/path corridor onto a terrain
 from its **centerline**, in a **persistent window**: edit the parameters and
 *Regenerate* without re-picking. Outputs a **new graded mesh** on a separate
 layer — the original terrain is never modified.
+
 
 ## Workflow
 

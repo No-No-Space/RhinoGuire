@@ -1,10 +1,13 @@
 name: RhinoGuire
 version: 0.1.0
-author: Aksel Alvarez 2026
+authors:
+  - Aksel Alvarez
 description: >
-  RhinoGuire - A collection of Python scripts for Rhino 8.
-  Tools for area measurement, data export/import, data visualization,
-  mesh tools, object search, and terrain grading (cut/fill earthwork).
+  RhinoGuire is a collection of Python 3 tools for Rhino 8 covering object
+  metadata management, footprint area calculation, live-field tagging,
+  data visualization, mesh-on-terrain projection, terrain grading
+  (cut/fill earthwork), and road draping. Aimed at architects and landscape
+  architects working with BIM data in Rhino.
 url: https://github.com/No-No-Space/RhinoGuire
 keywords:
   - rhinoguire
@@ -16,4 +19,6 @@ keywords:
   - grading
   - cut-fill
   - earthwork
+  - road
 rhino: ">=8.0"
+

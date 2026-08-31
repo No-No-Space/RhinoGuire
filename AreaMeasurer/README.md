@@ -1,10 +1,21 @@
 # Lindero — Footprint Area Calculator
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **Lindero** (`RG_Lindero`) |
+| **Category** | Area & Space Planning / GFA Matrix Calculator |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | Pure RhinoCommon (Excel export uses `openpyxl`) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_lindero.py"` |
+| **Input Geometry** | Solids, Extrusions, Closed Planar Curves, Planar Surfaces, Hatches |
+| **Output** | Plan footprint areas, Level × Category matrix, Excel (.xlsx), Chart PNG |
+
 ## What it does
 
 Lindero calculates the **footprint area** of Rhino objects — the plan area as seen from directly above (XY projection). This is distinct from the surface area that Rhino's built-in `Area` command computes, which sums all faces of an object.
 
 The tool runs as a **modeless window**, so Rhino stays fully interactive while the form is open. You can select objects, change layers, and run multiple calculations without reopening the script.
+
 
 ---
 

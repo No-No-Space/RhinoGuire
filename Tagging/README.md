@@ -1,9 +1,20 @@
 # Pregonero — Object Tagger
 
+| Specification | Details |
+| :--- | :--- |
+| **Tool Name** | **Pregonero** (`RG_Pregonero`) |
+| **Category** | BIM Annotation & Live-Field Leader Tagging |
+| **Runtime** | Rhino 8 (CPython 3) · Modeless `Eto.Forms` UI |
+| **Dependencies** | Pure RhinoCommon (Zero external dependencies) |
+| **Launch Command** | `! _-RunPythonScript "<path-to-repo>/RhinoGuire/launch_pregonero.py"` |
+| **Input** | Rhino Objects with User Text metadata / Template selection |
+| **Output** | Dynamic annotation leaders with live `%<UserText(...)>%` fields |
+
 Tag objects with leaders whose text comes from a reusable template. Placeholder
 keys are inserted as **live Rhino text fields**, so each leader reflects the
 tagged object's own user text and updates automatically when that text changes.
 It works like Revit's *tag by category* tool.
+
 
 ## Workflow
 

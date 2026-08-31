@@ -1,0 +1,41 @@
+﻿# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Affinity files & lock files
+*.af
+*.afdesign
+*.afphoto
+*.afpub
+*~lock~
+*.af*~lock~
+
+# Development-only docs & tests
+TerrainTools/PLAN.md
+TerrainTools/DECISIONS.md
+RoadTool/road_tool_plan.md
+AreaMeasurer/PLAN.md
+FOOD4RHINO.md
+CLAUDE.md
+*/tests/
+*/*/tests/
+
+# Runtime outputs and local state
+_prefs.json
+DataVisualization/_ExcelOutput/
+*.bak
+*.rui.bak
+ui/RhinoGuire.rui
+
+# IDE / editor
+.vscode/
+.cursor/
+.cursorignore
+.cursorindexingignore
+.claude/
