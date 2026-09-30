@@ -100,12 +100,27 @@ def test_tag_keys_are_unique_and_prefixed():
           all(k.startswith("RG_ROAD") for k in keys))
 
 
+# 2026-09-30 bug: an unchecked centerline Rebuild drifted up to 3.65m off the
+# drawn line. The drift cap scales with road width unless set explicitly.
+
+def test_max_drift_scales_with_width():
+    cfg = config.TrochaConfig(tolerance=0.01)
+    check("max_drift defaults to None (resolved per road)", cfg.max_drift is None)
+    check("resolved max_drift is 5% of width",
+          approx(cfg.resolved_max_drift(6.0), 6.0 * config.MAX_DRIFT_WIDTH_FACTOR))
+    check("resolved max_drift never below tolerance",
+          approx(config.TrochaConfig(tolerance=0.1).resolved_max_drift(0.5), 0.1))
+    check("explicit max_drift wins",
+          approx(config.TrochaConfig(tolerance=0.01, max_drift=1.0).resolved_max_drift(6.0), 1.0))
+
+
 if __name__ == "__main__":
     test_config_defaults_derive_from_sample_step()
     test_config_explicit_overrides_win()
     test_loose_tolerance_no_longer_inflates_defaults()
     test_tolerance_floor_still_applies()
     test_tag_keys_are_unique_and_prefixed()
+    test_max_drift_scales_with_width()
 
     print()
     if _failures:

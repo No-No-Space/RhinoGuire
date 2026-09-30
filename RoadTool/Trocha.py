@@ -38,6 +38,11 @@
 # _____________________________________________________________________
 # Last update:
 # - [15.07.2026] - 0.1 Initial release
+# - [30.09.2026] - Smoothing capped to 5% of width off the drawn line;
+#                  warnings for centerline fold-backs / too-tight bends and
+#                  for roads draped on a hidden terrain; batch warnings echo
+#                  to the command line; guard against Curve.Fit excursions
+#                  inflating thickness.
 # _____________________________________________________________________
 
 import System
@@ -93,6 +98,34 @@ def _add_brep_to_layer(brep, layer_name, name=None):
         if name:
             rs.ObjectName(obj_id, name)
     return obj_id
+
+
+def _terrain_hidden_reason(terrain_id):
+    """Why *terrain_id* isn't on screen ('layer X is off' / 'object is hidden'),
+    or None if it is displayed. Roads draped on an invisible terrain get
+    judged against whatever terrain *is* visible and look buried/floating
+    wherever the two differ (bug 2026-09-30: roads on TOPO-Surface-Modified,
+    layer off, rendered over TOPO-Surface-Original)."""
+    rh_obj = sc.doc.Objects.FindId(System.Guid(str(terrain_id)))
+    if rh_obj is None:
+        return None
+    if rh_obj.IsHidden:
+        return "terrain object is hidden"
+    layer = sc.doc.Layers[rh_obj.Attributes.LayerIndex]
+    while layer is not None:
+        if not layer.IsVisible:
+            return "terrain layer '%s' is off" % layer.FullPath
+        if layer.ParentLayerId == System.Guid.Empty:
+            break
+        layer = sc.doc.Layers.FindId(layer.ParentLayerId)
+    return None
+
+
+def _print_warnings(center_id, flags):
+    """Echo every build warning to the command line, where there's room for
+    the full text (the status label only fits a summary)."""
+    for f in flags:
+        print("Trocha [%s]: %s" % (center_id, f))
 
 
 def _positive(text, label):
@@ -416,10 +449,18 @@ class TrochaForm(forms.Form):
             sc.doc.EndUndoRecord(record)
         sc.doc.Views.Redraw()
 
+        flags = list(result.flags)
+        hidden = _terrain_hidden_reason(self.terrain_id)
+        if hidden:
+            flags.insert(0, "Draped on a terrain you can't see (%s) - the road will look "
+                            "buried/floating against the visible terrain." % hidden)
+        _print_warnings(self.center_id, flags)
         kind = "solid" if result.brep.IsSolid else "surface only — see warning"
         msg = "Road built (%s, thickness %.4g)." % (kind, result.thickness or thickness)
-        if result.flags:
-            msg += "  ⚠ " + result.flags[0]
+        if flags:
+            msg += "  ⚠ " + flags[0]
+            if len(flags) > 1:
+                msg += "  (+%d more — see command line)" % (len(flags) - 1)
             self._status(msg, "warn")
         else:
             self._status(msg, "ok")
@@ -469,7 +510,7 @@ class TrochaForm(forms.Form):
             return
 
         record = sc.doc.BeginUndoRecord("Trocha: generate selected roads")
-        built, skipped = 0, 0
+        built, skipped, warned = 0, 0, 0
         try:
             for cid in ids:
                 curve = rs.coercecurve(cid)
@@ -487,17 +528,26 @@ class TrochaForm(forms.Form):
                 _state.write_centerline_tags(cid, width, thickness, str(self.terrain_id), str(slab_id))
                 _state.write_slab_tag(slab_id, cid)
                 built += 1
+                if result.flags:
+                    warned += 1
+                    _print_warnings(cid, result.flags)
         finally:
             sc.doc.EndUndoRecord(record)
         sc.doc.Views.Redraw()
-        self._status("Generated %d road(s), skipped %d." % (built, skipped),
-                      "ok" if built else "warn")
+        hidden = _terrain_hidden_reason(self.terrain_id)
+        self._report_batch("Generated", built, skipped, warned, [hidden] if hidden else [])
         self._update_buttons()
 
     def _regenerate_centerlines(self, centerlines):
         """Re-drape each of *centerlines* using its own stored width/thickness/
-        terrain (road_tool_plan.md create<->update model). Returns (updated, skipped)."""
-        updated, skipped = 0, 0
+        terrain (road_tool_plan.md create<->update model).
+
+        Returns (updated, skipped, warned, hidden) - *warned* counts roads
+        whose build raised warnings (echoed to the command line), *hidden*
+        lists the reasons any stored terrain isn't on screen.
+        """
+        updated, skipped, warned = 0, 0, 0
+        hidden = []
         for cid in centerlines:
             curve = rs.coercecurve(cid)
             width, thickness, terrain_id = _state.read_params(cid)
@@ -522,7 +572,24 @@ class TrochaForm(forms.Form):
             _state.write_centerline_tags(cid, width, thickness, str(terrain_id), str(slab_id))
             _state.write_slab_tag(slab_id, cid)
             updated += 1
-        return updated, skipped
+            if result.flags:
+                warned += 1
+                _print_warnings(cid, result.flags)
+            reason = _terrain_hidden_reason(terrain_id)
+            if reason and reason not in hidden:
+                hidden.append(reason)
+        return updated, skipped, warned, hidden
+
+    def _report_batch(self, verb, done, skipped, warned, hidden):
+        """Status summary for the batch buttons. A hidden terrain outranks
+        per-road warnings: it's the one that makes every road look wrong."""
+        msg = "%s %d road(s), skipped %d." % (verb, done, skipped)
+        if hidden:
+            msg += "  ⚠ Draped on a terrain you can't see (%s) — roads will look "                    "buried/floating against the visible terrain." % "; ".join(hidden)
+            print("Trocha: " + msg)
+        elif warned:
+            msg += "  ⚠ %d road(s) with warnings — see command line." % warned
+        self._status(msg, "warn" if (hidden or warned or not done) else "ok")
 
     def on_update_selected(self, sender, e):
         if not self.center_ids:
@@ -535,13 +602,12 @@ class TrochaForm(forms.Form):
             return
         record = sc.doc.BeginUndoRecord("Trocha: update selected roads")
         try:
-            updated, skipped = self._regenerate_centerlines(tagged)
+            updated, skipped, warned, hidden = self._regenerate_centerlines(tagged)
         finally:
             sc.doc.EndUndoRecord(record)
         sc.doc.Views.Redraw()
         skipped += len(self.center_ids) - len(tagged)
-        self._status("Updated %d road(s), skipped %d." % (updated, skipped),
-                      "ok" if updated else "warn")
+        self._report_batch("Updated", updated, skipped, warned, hidden)
 
     def on_update_all(self, sender, e):
         centerlines = _state.all_tagged_centerlines()
@@ -550,12 +616,11 @@ class TrochaForm(forms.Form):
             return
         record = sc.doc.BeginUndoRecord("Trocha: update all roads")
         try:
-            updated, skipped = self._regenerate_centerlines(centerlines)
+            updated, skipped, warned, hidden = self._regenerate_centerlines(centerlines)
         finally:
             sc.doc.EndUndoRecord(record)
         sc.doc.Views.Redraw()
-        self._status("Updated %d road(s), skipped %d." % (updated, skipped),
-                      "ok" if updated else "warn")
+        self._report_batch("Updated", updated, skipped, warned, hidden)
 
     def on_merge(self, sender, e):
         # Scoped to the picked centerlines (not the whole document): a Boolean

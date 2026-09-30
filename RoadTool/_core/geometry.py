@@ -39,22 +39,110 @@ class SlabResult(object):
 # Pipeline steps (road_tool_plan.md S4, numbered to match)
 # ---------------------------------------------------------------------------
 
-def _prep_centerline(curve, smooth_center):
+def _curve_drift(a, b):
+    """Max distance between curves *a* and *b* (None if it can't be measured)."""
+    try:
+        res = rg.Curve.GetDistancesBetweenCurves(a, b, 0.001)
+    except Exception:
+        return None
+    if not res or not res[0]:
+        return None
+    return res[1]
+
+
+def _prep_centerline(curve, smooth_center, max_drift=None):
     """S4.1 - optionally rebuild a kinked/polyline centerline to a smooth
-    degree-3 curve. Returns *curve* unchanged if rebuilding isn't requested
-    or fails.
+    degree-3 curve. Returns (curve, drift_flag).
+
+    A fixed-count Rebuild can pull the curve meters off the drawn line
+    (bug 2026-09-30: up to 3.65m on a real site, pushing roads off their
+    bench onto the bank). So the rebuild is retried with more control points
+    until it stays within *max_drift* of the original; if no count manages
+    that, the original curve is used unsmoothed and a flag says so.
     """
     if not smooth_center:
-        return curve
+        return curve, None
     nc = curve.ToNurbsCurve()
     if nc is None:
-        return curve
-    try:
-        point_count = max(nc.Points.Count, 10)
-        rebuilt = nc.Rebuild(point_count, 3, True)
-    except Exception:
-        return curve
-    return rebuilt or curve
+        return curve, None
+    point_count = max(nc.Points.Count, 10)
+    # Upper bound: ~1 control point per metre is already far denser than any
+    # drawn road needs; past that, extra points just reproduce the kinks.
+    max_count = max(point_count, int(curve.GetLength()) + 4)
+    best_drift = None
+    while True:
+        try:
+            rebuilt = nc.Rebuild(point_count, 3, True)
+        except Exception:
+            rebuilt = None
+        if rebuilt is not None:
+            if max_drift is None:
+                return rebuilt, None
+            drift = _curve_drift(curve, rebuilt)
+            if drift is not None:
+                if drift <= max_drift:
+                    return rebuilt, None
+                best_drift = drift if best_drift is None else min(best_drift, drift)
+        if point_count >= max_count:
+            break
+        point_count = min(point_count * 2, max_count)
+    if best_drift is None:
+        return curve, None
+    return curve, (
+        "Smoothing would move the centerline %.2f off the drawn line (limit %.2f) - "
+        "used the curve unsmoothed." % (best_drift, max_drift))
+
+
+def _centerline_problems(curve, width, max_reports=3):
+    """Flags for centerline shapes that make the slab twist or fold:
+    sharp turn-backs (tangent reverses within a short distance) and bends
+    tighter than half the road width (the inner edge crosses itself).
+    Each problem is reported with its plan (x, y) so it can be found and
+    fixed in the drawing. Nearby hits are grouped into one report.
+    """
+    length = curve.GetLength()
+    if length <= 0:
+        return []
+    step = min(0.25, width / 8.0)
+    params = curve.DivideByLength(step, True)
+    if not params:
+        return []
+    half = width / 2.0
+    folds, tight = [], []
+
+    def _add(hits, pt):
+        if not hits or hits[-1].DistanceTo(pt) > width:
+            hits.append(pt)
+
+    prev = None
+    for t in params:
+        tan = curve.TangentAt(t)
+        tan.Z = 0.0
+        if tan.Length < 1e-9:
+            continue
+        tan.Unitize()
+        pt = curve.PointAt(t)
+        if prev is not None and rg.Vector3d.VectorAngle(prev, tan) > math.pi / 2.0:
+            _add(folds, pt)
+        prev = tan
+        k = curve.CurvatureAt(t)
+        if k is not None and k.IsValid and k.Length > 1e-9 and 1.0 / k.Length < half:
+            _add(tight, pt)
+
+    def _where(pts):
+        s = ", ".join("(%.1f, %.1f)" % (p.X, p.Y) for p in pts[:max_reports])
+        if len(pts) > max_reports:
+            s += " +%d more" % (len(pts) - max_reports)
+        return s
+
+    flags = []
+    if folds:
+        flags.append("Centerline turns back on itself at %s - the road twists there; "
+                     "fix the curve." % _where(folds))
+    if tight:
+        flags.append("Bend tighter than half the road width at %s - the inner edge "
+                     "folds; widen the bend or narrow the road." % _where(tight))
+    return flags
 
 
 def _stations(curve, step):
@@ -141,17 +229,30 @@ def _fill_gaps(samples):
 
 
 def _fit_edge(points, fit_tol):
-    """S4.5 - fit a smooth degree-3 curve through *points*."""
+    """S4.5 - fit a smooth degree-3 curve through *points*.
+
+    Curve.Fit is not trustworthy on long edges (bug 2026-09-30: on a 2.2km
+    road, fit_tol 0.05 stayed within 0.15, 0.10 swung 6.6 off the samples,
+    0.20 returned None). An excursion like that reads as terrain deviation
+    ``d`` and blows up the thickness (0.25 -> 13.3). So a fit is only kept
+    if it actually stays near the samples; otherwise retry tighter, then
+    fall back to the plain interpolated curve (exact through the samples).
+    """
     if len(points) < 2:
         return None
     crv = rg.Curve.CreateInterpolatedCurve(points, 3)
     if crv is None:
         return None
-    try:
-        fitted = crv.Fit(3, fit_tol, 0.0)
-    except Exception:
-        fitted = None
-    return fitted or crv
+    tol = fit_tol
+    for _ in range(3):
+        try:
+            fitted = crv.Fit(3, tol, 0.0)
+        except Exception:
+            fitted = None
+        if fitted is not None and _max_deviation(fitted, points) <= 2.0 * fit_tol:
+            return fitted
+        tol *= 0.5
+    return crv
 
 
 def _max_deviation(fitted_curve, raw_points):
@@ -222,7 +323,12 @@ def build_slab(center_curve, terrain_model, width, thickness, cfg):
     tol = cfg.tolerance
     flags = []
 
-    curve = _prep_centerline(center_curve, cfg.smooth_center) or center_curve
+    curve, drift_flag = _prep_centerline(
+        center_curve, cfg.smooth_center, cfg.resolved_max_drift(width))
+    curve = curve or center_curve
+    if drift_flag:
+        flags.append(drift_flag)
+    flags.extend(_centerline_problems(curve, width))
 
     pts, tans = _stations(curve, cfg.sample_step)
     if len(pts) < 2:

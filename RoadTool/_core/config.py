@@ -25,7 +25,7 @@ class TrochaConfig(object):
     """
 
     def __init__(self, tolerance, sample_step=None, fit_tol=None, top_rise=None,
-                 margin=None, smooth_center=True, corner_radius=None):
+                 margin=None, smooth_center=True, corner_radius=None, max_drift=None):
         self.tolerance = tolerance
         self.sample_step = sample_step if sample_step is not None else DEFAULT_SAMPLE_STEP
         # Floor multiplier is deliberately gentle (0.1x, not e.g. 2x): it must
@@ -38,11 +38,23 @@ class TrochaConfig(object):
         self.margin = margin if margin is not None else max(self.sample_step * 0.02, tolerance * 0.1)
         self.smooth_center = smooth_center
         self.corner_radius = corner_radius
+        # How far the smoothed centerline may stray (in plan) from the drawn
+        # one. None -> resolved per road in build_slab() as
+        # MAX_DRIFT_WIDTH_FACTOR * width, since what counts as "off the road"
+        # scales with the road (bug 2026-09-30: an unchecked Rebuild moved
+        # centerlines up to 3.65m sideways, off the road bench on a hillside).
+        self.max_drift = max_drift
+
+    def resolved_max_drift(self, width):
+        if self.max_drift is not None:
+            return self.max_drift
+        return max(width * MAX_DRIFT_WIDTH_FACTOR, self.tolerance)
 
 
 DEFAULT_WIDTH = 4.0
 DEFAULT_THICKNESS = 0.25
 DEFAULT_SAMPLE_STEP = 2.0
+MAX_DRIFT_WIDTH_FACTOR = 0.05  # smoothed centerline may drift <= 5% of road width
 DEFAULT_LAYER = "RoadTool::Roads"
 MERGED_LAYER = "RoadTool::Roads::Merged"
 DISPLAY_MODE_NAME = "RG_Technical_Colour_NoEdges"
