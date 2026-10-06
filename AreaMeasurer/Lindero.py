@@ -41,9 +41,18 @@
 #   R1 / R2 — Analysis:
 #        One shared engine: aggregates merged areas by a chosen dimension
 #        (Category / Level / UserText key) across all levels and compares
-#        against the target table in Settings. Bullet chart per entry.
+#        against the target table in Settings (supports both Brutto and Netto goals).
+#        Bullet chart per entry.
 # _____________________________________________________________________
 # Last update:
+# - [06.10.2026] - 0.9.0 Netto Area calculations added across all tools:
+#                     Gross / Net factor conversion (BGF / NF ratio, default 2.2)
+#                     in Settings; side-by-side Brutto and Netto columns in S1,
+#                     S2, S3 (breakdown & objects detail), and S4; dual Brutto
+#                     and Netto goal settings with automatic two-way conversion;
+#                     R1/R2 comparison mode toggle for Brutto (BGF) vs Netto (NF)
+#                     targets; Write Area supporting Brutto, Netto, or both;
+#                     Excel exports updated with Brutto & Netto sheets and matrices.
 # - [02.07.2026] - 0.8.3 Copy Window fixed on multi-monitor setups: window
 #                     rect now read from Win32 in physical pixels (ctypes,
 #                     DwmGetWindowAttribute → GetWindowRect fallback) instead
@@ -122,7 +131,7 @@ _importlib.reload(_lp)
 
 # Version shown in the UI. The file timestamp is added so ANY edit to this
 # file is visible in the running window — no stale-instance guessing.
-__version__ = "0.8.3"
+__version__ = "0.9.0"
 try:
     import datetime as _dt
     _BUILD_STAMP = _dt.datetime.fromtimestamp(
@@ -1096,7 +1105,7 @@ def calc_s4(parent_layer, dims, ignore_prefix=_lp.DEFAULT_IGNORE_PREFIX,
 
 
 def calc_r(parent_layer, dim, targets, ignore_prefix=_lp.DEFAULT_IGNORE_PREFIX,
-           z_height_tol=0.5):
+           z_height_tol=0.5, factor=2.2, metric="brutto"):
     """
     R1 / R2 shared engine (v2).
     Aggregates merged footprint areas by ONE dimension (see _dim_value)
@@ -1104,10 +1113,10 @@ def calc_r(parent_layer, dim, targets, ignore_prefix=_lp.DEFAULT_IGNORE_PREFIX,
     group are merged (Z-banded union) to remove same-group overlaps, then
     the merged areas are summed across levels.
 
-    targets: {label: float} from the Settings target table. Labels without
-    a target chart as "(no target)" and produce a warning.
+    targets: {label: {'brutto': float, 'netto': float}} or {label: float} from Settings.
+    metric: 'brutto' or 'netto' — controls which measured area & goal are charted.
 
-    Returns {entries: [{label, measured, goal}], warnings: [str]}.
+    Returns {entries: [{label, measured, goal, b_meas, b_goal, n_meas, n_goal, metric}], warnings: [str]}.
     """
     records, _info = collect_objects(parent_layer, ignore_prefix)
     cache = {}
@@ -1125,10 +1134,42 @@ def calc_r(parent_layer, dim, targets, ignore_prefix=_lp.DEFAULT_IGNORE_PREFIX,
     entries, warnings = [], []
     targets = targets or {}
     for v in sorted(area_by_val):
-        goal = targets.get(v)
+        b_meas = area_by_val[v]
+        n_meas = (b_meas / factor) if factor > 0 else 0.0
+
+        tgt = targets.get(v)
+        b_goal = None
+        n_goal = None
+        if isinstance(tgt, dict):
+            b_goal = tgt.get("brutto")
+            n_goal = tgt.get("netto")
+        elif tgt is not None:
+            b_goal = float(tgt)
+            n_goal = (b_goal / factor) if factor > 0 else None
+
+        if metric == "netto":
+            meas = n_meas
+            goal = n_goal
+            mode_tag = "Net"
+        else:
+            meas = b_meas
+            goal = b_goal
+            mode_tag = "Gross"
+
         if goal is None:
-            warnings.append(f"[!] No target set for '{v}' (Settings → Target Areas)")
-        entries.append({"label": v, "measured": area_by_val[v], "goal": goal})
+            warnings.append(f"[!] No {mode_tag} target set for '{v}' (Settings → Target Areas)")
+
+        entries.append({
+            "label": v,
+            "measured": meas,
+            "goal": goal,
+            "b_meas": b_meas,
+            "b_goal": b_goal,
+            "n_meas": n_meas,
+            "n_goal": n_goal,
+            "metric": metric,
+            "mode_tag": mode_tag,
+        })
 
     return {"entries": entries, "warnings": warnings}
 
@@ -1150,7 +1191,7 @@ def _fmt(v):
 
 _CHART_ROW_H   = 54
 _CHART_LABEL_W = 128
-_CHART_VALUE_W = 108
+_CHART_VALUE_W = 118
 _CHART_BAR_H   = 18
 
 
@@ -1165,6 +1206,8 @@ def _draw_bullet_row(g, i, entry, tol, unit, total_w):
     label = entry["label"]
     meas  = entry["measured"]
     goal  = entry.get("goal")
+    metric = entry.get("metric", "brutto")
+    tag = "N" if metric == "netto" else "B"
 
     font    = drawing.Font("Arial", 8)
     sm_font = drawing.Font("Arial", 7)
@@ -1185,7 +1228,7 @@ def _draw_bullet_row(g, i, entry, tol, unit, total_w):
     if goal is None or goal <= 0:
         g.DrawText(font, _t.CHART_NOTGT,
                    drawing.PointF(chart_x + 4.0, bar_y),
-                   f"{meas:,.2f} (no target)")
+                   f"[{tag}] {meas:,.2f} (no target)")
         return
 
     max_val = max(goal * 1.35, meas * 1.05) if meas > goal else goal * 1.35
@@ -1240,7 +1283,7 @@ def _draw_bullet_row(g, i, entry, tol, unit, total_w):
     vx    = float(total_w - _CHART_VALUE_W + 4)
     g.DrawText(font,    _t.CHART_LABEL,
                drawing.PointF(vx, bar_y - 1.0),
-               f"{meas:,.1f}/{goal:,.1f}")
+               f"[{tag}] {meas:,.1f}/{goal:,.1f}")
     g.DrawText(sm_font, _t.CHART_DELTA,
                drawing.PointF(vx, bar_y + 11.0),
                f"{sign}{delta:.1f}%  [{unit}]")
@@ -1275,8 +1318,8 @@ class LinderoForm(forms.Form):
         self.Title = f"Lindero — Footprint Area Calculator  {_VERSION_TEXT}"
         self.Padding = drawing.Padding(10)
         self.Resizable = True
-        self.MinimumSize = drawing.Size(480, 540)
-        self.ClientSize  = drawing.Size(680, 720)
+        self.MinimumSize = drawing.Size(540, 560)
+        self.ClientSize  = drawing.Size(740, 740)
         self.BackgroundColor = _t.BG
         self.Owner = Rhino.UI.RhinoEtoApp.MainWindow
 
@@ -1299,7 +1342,7 @@ class LinderoForm(forms.Form):
         self._ks_layer_s4_par = None
 
         # Settings target table rows (dynamic)
-        self._target_rows = []  # [{"label_tb", "value_tb", "row"}]
+        self._target_rows = []  # [{"label_tb", "brutto_tb", "netto_tb", "row", "_updating"}]
 
         # R1 / R2 chart state
         self._r1_entries = []
@@ -1434,8 +1477,18 @@ class LinderoForm(forms.Form):
         self._write_key_combo = forms.ComboBox()
         self._write_key_combo.DataStore = ["Area"] + list(self.available_keys)
         self._write_key_combo.Text = "Area"
-        self._write_key_combo.Width = 180
+        self._write_key_combo.Width = 140
         self._ks_write = _t.bind_key_search(self._write_key_combo, ["Area"] + list(self.available_keys))
+
+        wm_lbl = forms.Label()
+        wm_lbl.Text = "Value:"
+
+        self._write_mode_dd = forms.DropDown()
+        self._write_mode_dd.Items.Add("Brutto Area")
+        self._write_mode_dd.Items.Add("Netto Area")
+        self._write_mode_dd.Items.Add("Both (Key_Brutto & Key_Netto)")
+        self._write_mode_dd.SelectedIndex = 0
+        self._write_mode_dd.Width = 190
 
         confirm_btn = forms.Button()
         confirm_btn.Text = "Confirm Write"
@@ -1451,6 +1504,8 @@ class LinderoForm(forms.Form):
 
         self._write_panel.Items.Add(forms.StackLayoutItem(wk_lbl))
         self._write_panel.Items.Add(forms.StackLayoutItem(self._write_key_combo))
+        self._write_panel.Items.Add(forms.StackLayoutItem(wm_lbl))
+        self._write_panel.Items.Add(forms.StackLayoutItem(self._write_mode_dd))
         self._write_panel.Items.Add(forms.StackLayoutItem(confirm_btn))
         self._write_panel.Items.Add(forms.StackLayoutItem(cancel_btn))
 
@@ -1469,7 +1524,7 @@ class LinderoForm(forms.Form):
         controls.Padding = drawing.Padding(8)
 
         desc = forms.Label()
-        desc.Text = "Individual footprint per selected object. No overlap handling."
+        desc.Text = "Individual footprint per selected object. Overlapping footprints merged per layer."
         desc.TextColor = _t.TEXT_MUTED
         controls.AddRow(desc)
         controls.AddRow(None)
@@ -1489,7 +1544,11 @@ class LinderoForm(forms.Form):
         note.TextColor = _t.TEXT_MUTED
         controls.AddRow(note)
 
-        self.results_s1_grid = self._make_results_grid([(True, 0), (False, 110)])
+        self.results_s1_grid = self._make_results_grid([
+            ("Object / Group", True, 0),
+            ("Brutto Area", False, 100),
+            ("Netto Area", False, 100),
+        ], show_header=True)
 
         layout = forms.StackLayout()
         layout.Orientation = forms.Orientation.Vertical
@@ -1532,7 +1591,11 @@ class LinderoForm(forms.Form):
         self._ks_combos.append(_t.bind_key_search(self.obj_key_s2, self.available_keys))
         controls.AddRow(obj_key_lbl, self.obj_key_s2)
 
-        self.results_s2_grid = self._make_results_grid([(True, 0), (False, 110)])
+        self.results_s2_grid = self._make_results_grid([
+            ("Object / Group", True, 0),
+            ("Brutto Area", False, 100),
+            ("Netto Area", False, 100),
+        ], show_header=True)
 
         layout = forms.StackLayout()
         layout.Orientation = forms.Orientation.Vertical
@@ -1625,8 +1688,12 @@ class LinderoForm(forms.Form):
         brk_hdr = forms.Label()
         brk_hdr.Text = "Breakdown — Level × Category"
         brk_hdr.Font = _t.F_HEAD
-        # breakdown grid: label (expand) + area (fixed)
-        self.results_s3_breakdown_grid = self._make_results_grid([(True, 0), (False, 110)])
+        # breakdown grid: Level/Category (expand) + Brutto (fixed) + Netto (fixed)
+        self.results_s3_breakdown_grid = self._make_results_grid([
+            ("Level / Category", True, 0),
+            ("Brutto Area", False, 100),
+            ("Netto Area", False, 100),
+        ], show_header=True)
         brk_pane = forms.StackLayout()
         brk_pane.Orientation = forms.Orientation.Vertical
         brk_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
@@ -1636,8 +1703,13 @@ class LinderoForm(forms.Form):
         obj_hdr = forms.Label()
         obj_hdr.Text = "Objects — Detail"
         obj_hdr.Font = _t.F_HEAD
-        # objects grid: object name (expand) + category (fixed) + area (fixed)
-        self.results_s3_objects_grid = self._make_results_grid([(True, 0), (False, 120), (False, 90)])
+        # objects grid: object name (expand) + category (fixed) + Brutto (fixed) + Netto (fixed)
+        self.results_s3_objects_grid = self._make_results_grid([
+            ("Object", True, 0),
+            ("Category", False, 120),
+            ("Brutto Area", False, 90),
+            ("Netto Area", False, 90),
+        ], show_header=True)
         obj_pane = forms.StackLayout()
         obj_pane.Orientation = forms.Orientation.Vertical
         obj_pane.HorizontalContentAlignment = forms.HorizontalAlignment.Stretch
@@ -1728,22 +1800,31 @@ class LinderoForm(forms.Form):
 
         # Results tree grid
         self.results_s4_grid = forms.TreeGridView()
-        self.results_s4_grid.ShowHeader = False
+        self.results_s4_grid.ShowHeader = True
         self.results_s4_grid.AllowColumnReordering = False
         self.results_s4_grid.AllowMultipleSelection = False
         self.results_s4_grid.Font = _t.F_MONO
 
         _lbl_col = forms.GridColumn()
+        _lbl_col.HeaderText = "Hierarchy / Dimension"
         _lbl_col.Editable = False
         _lbl_col.DataCell = forms.TextBoxCell(0)
         _lbl_col.Expand = True
         self.results_s4_grid.Columns.Add(_lbl_col)
 
-        _area_col = forms.GridColumn()
-        _area_col.Editable = False
-        _area_col.DataCell = forms.TextBoxCell(1)
-        _area_col.Width = 110
-        self.results_s4_grid.Columns.Add(_area_col)
+        _brutto_col = forms.GridColumn()
+        _brutto_col.HeaderText = "Brutto Area"
+        _brutto_col.Editable = False
+        _brutto_col.DataCell = forms.TextBoxCell(1)
+        _brutto_col.Width = 100
+        self.results_s4_grid.Columns.Add(_brutto_col)
+
+        _netto_col = forms.GridColumn()
+        _netto_col.HeaderText = "Netto Area"
+        _netto_col.Editable = False
+        _netto_col.DataCell = forms.TextBoxCell(2)
+        _netto_col.Width = 100
+        self.results_s4_grid.Columns.Add(_netto_col)
 
         self.results_s4_grid.CellFormatting += self._on_cell_format
         layout.Items.Add(forms.StackLayoutItem(self.results_s4_grid, True))
@@ -1871,13 +1952,21 @@ class LinderoForm(forms.Form):
         self.r1_dim_dd.Items.Add("Level (layer)")
         self.r1_dim_dd.Items.Add("UserText key")
         self.r1_dim_dd.SelectedIndex = 0
-        self.r1_dim_dd.Width = 150
+        self.r1_dim_dd.Width = 140
         self.r1_key_cb = forms.ComboBox()
         self.r1_key_cb.DataStore = self.available_keys
         self.r1_key_cb.PlaceholderText = "User text key"
-        self.r1_key_cb.Width = 180
+        self.r1_key_cb.Width = 150
         self.r1_key_cb.Visible = False
         self._ks_combos.append(_t.bind_key_search(self.r1_key_cb, self.available_keys))
+
+        metric_lbl = forms.Label()
+        metric_lbl.Text = "Compare:"
+        self.r1_metric_dd = forms.DropDown()
+        self.r1_metric_dd.Items.Add("Brutto (BGF)")
+        self.r1_metric_dd.Items.Add("Netto (NF)")
+        self.r1_metric_dd.SelectedIndex = 0
+        self.r1_metric_dd.Width = 110
 
         def _r1_dim_changed(s, e):
             self.r1_key_cb.Visible = (self.r1_dim_dd.SelectedIndex == 2)
@@ -1886,6 +1975,8 @@ class LinderoForm(forms.Form):
         dim_row.Items.Add(forms.StackLayoutItem(dim_lbl))
         dim_row.Items.Add(forms.StackLayoutItem(self.r1_dim_dd))
         dim_row.Items.Add(forms.StackLayoutItem(self.r1_key_cb))
+        dim_row.Items.Add(forms.StackLayoutItem(metric_lbl))
+        dim_row.Items.Add(forms.StackLayoutItem(self.r1_metric_dd))
 
         self.warn_r1 = forms.Label()
         self.warn_r1.TextColor = _t.TEXT_ERROR
@@ -1938,13 +2029,21 @@ class LinderoForm(forms.Form):
         self.r2_dim_dd.Items.Add("Level (layer)")
         self.r2_dim_dd.Items.Add("UserText key")
         self.r2_dim_dd.SelectedIndex = 1
-        self.r2_dim_dd.Width = 150
+        self.r2_dim_dd.Width = 140
         self.r2_key_cb = forms.ComboBox()
         self.r2_key_cb.DataStore = self.available_keys
         self.r2_key_cb.PlaceholderText = "User text key"
-        self.r2_key_cb.Width = 180
+        self.r2_key_cb.Width = 150
         self.r2_key_cb.Visible = False
         self._ks_combos.append(_t.bind_key_search(self.r2_key_cb, self.available_keys))
+
+        metric_lbl = forms.Label()
+        metric_lbl.Text = "Compare:"
+        self.r2_metric_dd = forms.DropDown()
+        self.r2_metric_dd.Items.Add("Brutto (BGF)")
+        self.r2_metric_dd.Items.Add("Netto (NF)")
+        self.r2_metric_dd.SelectedIndex = 0
+        self.r2_metric_dd.Width = 110
 
         def _r2_dim_changed(s, e):
             self.r2_key_cb.Visible = (self.r2_dim_dd.SelectedIndex == 2)
@@ -1953,6 +2052,8 @@ class LinderoForm(forms.Form):
         dim_row.Items.Add(forms.StackLayoutItem(dim_lbl))
         dim_row.Items.Add(forms.StackLayoutItem(self.r2_dim_dd))
         dim_row.Items.Add(forms.StackLayoutItem(self.r2_key_cb))
+        dim_row.Items.Add(forms.StackLayoutItem(metric_lbl))
+        dim_row.Items.Add(forms.StackLayoutItem(self.r2_metric_dd))
 
         self.warn_r2 = forms.Label()
         self.warn_r2.TextColor = _t.TEXT_ERROR
@@ -2020,6 +2121,25 @@ class LinderoForm(forms.Form):
         layout.AddRow(None, pref_hint)
         layout.AddRow(None)
 
+        factor_lbl = forms.Label()
+        factor_lbl.Text = "Gross / Net Factor:"
+        self.factor_stepper = forms.NumericStepper()
+        self.factor_stepper.MinValue      = 0.01
+        self.factor_stepper.MaxValue      = 100.0
+        self.factor_stepper.Value         = 2.20
+        self.factor_stepper.DecimalPlaces = 2
+        self.factor_stepper.Increment     = 0.10
+        self.factor_stepper.Width         = 80
+        factor_hint = forms.Label()
+        factor_hint.Text = (
+            "Factor to convert Gross to Net area: Net = Gross / Factor (e.g. 2.20 for BGF / NF).\n"
+            "Applies across all tools, side-by-side columns, and dual goal conversions."
+        )
+        factor_hint.TextColor = _t.TEXT_MUTED
+        layout.AddRow(factor_lbl, self.factor_stepper)
+        layout.AddRow(None, factor_hint)
+        layout.AddRow(None)
+
         tol_lbl = forms.Label()
         tol_lbl.Text = "Global Tolerance (%):"
         self.tolerance_stepper = forms.NumericStepper()
@@ -2085,12 +2205,26 @@ class LinderoForm(forms.Form):
 
         tgt_hint = forms.Label()
         tgt_hint.Text = (
-            "Label must match the aggregation value — e.g. a category layer\n"
-            "name ('Pflege'), a level name, or a user-text value.\n"
+            "Set target goals for Brutto and/or Netto areas. Editing one goal\n"
+            "automatically calculates the other using the Gross / Net factor.\n"
             "Values in model units²; decimal comma accepted."
         )
         tgt_hint.TextColor = _t.TEXT_MUTED
         layout.AddRow(None, tgt_hint)
+
+        # Header row for targets table
+        tgt_hdr_row = forms.StackLayout()
+        tgt_hdr_row.Orientation = forms.Orientation.Horizontal
+        tgt_hdr_row.Spacing = 4
+
+        th_lbl = forms.Label(); th_lbl.Text = "Label / Category"; th_lbl.Font = _t.F_SANS_B; th_lbl.Width = 180
+        th_brutto = forms.Label(); th_brutto.Text = "Brutto Goal"; th_brutto.Font = _t.F_SANS_B; th_brutto.Width = 85
+        th_netto = forms.Label(); th_netto.Text = "Netto Goal"; th_netto.Font = _t.F_SANS_B; th_netto.Width = 85
+
+        tgt_hdr_row.Items.Add(forms.StackLayoutItem(th_lbl))
+        tgt_hdr_row.Items.Add(forms.StackLayoutItem(th_brutto))
+        tgt_hdr_row.Items.Add(forms.StackLayoutItem(th_netto))
+        layout.AddRow(None, tgt_hdr_row)
 
         self._targets_layout = forms.StackLayout()
         self._targets_layout.Orientation = forms.Orientation.Vertical
@@ -2175,41 +2309,121 @@ class LinderoForm(forms.Form):
             dd.Text = ""
 
     # ------------------------------------------------------------------
-    # Settings helpers — ignore prefix, target table, R dimensions
+    # Settings helpers — ignore prefix, factor, target table, R dimensions
     # ------------------------------------------------------------------
 
     def _ignore_prefix(self):
         """Current ignore prefix from Settings. Empty = nothing ignored."""
         return self.ignore_prefix_tb.Text.strip()
 
-    def _add_target_row(self, label="", value=""):
-        """Append one [label][value][✕] row to the Settings target table."""
+    def _gross_net_factor(self):
+        """Current Gross / Net conversion factor from Settings (default 2.2)."""
+        stepper = getattr(self, "factor_stepper", None)
+        if stepper is not None:
+            try:
+                v = float(stepper.Value)
+                if v > 0.0:
+                    return v
+            except Exception:
+                pass
+        return 2.20
+
+    def _add_target_row(self, label="", brutto_val="", netto_val=""):
+        """Append one [label][brutto_val][netto_val][✕] row to the Settings target table.
+        Editing Brutto calculates Netto (and vice-versa) using the current factor."""
         row = forms.StackLayout()
         row.Orientation = forms.Orientation.Horizontal
         row.Spacing = 4
 
         label_tb = forms.TextBox()
-        label_tb.Text = label
-        label_tb.PlaceholderText = "Label (category / level / key value)"
-        label_tb.Width = 240
+        label_tb.Text = str(label)
+        label_tb.PlaceholderText = "Category / level / key"
+        label_tb.Width = 180
 
-        value_tb = forms.TextBox()
-        value_tb.Text = value
-        value_tb.PlaceholderText = "Target"
-        value_tb.Width = 90
+        brutto_tb = forms.TextBox()
+        brutto_tb.Text = str(brutto_val) if brutto_val is not None else ""
+        brutto_tb.PlaceholderText = "Brutto Goal"
+        brutto_tb.Width = 85
+
+        netto_tb = forms.TextBox()
+        netto_tb.Text = str(netto_val) if netto_val is not None else ""
+        netto_tb.PlaceholderText = "Netto Goal"
+        netto_tb.Width = 85
 
         rm_btn = forms.Button()
         rm_btn.Text = "✕"
         rm_btn.Width = 28
 
-        rec = {"label_tb": label_tb, "value_tb": value_tb, "row": row}
+        rec = {
+            "label_tb": label_tb,
+            "brutto_tb": brutto_tb,
+            "netto_tb": netto_tb,
+            "row": row,
+            "_updating": False,
+        }
+
+        # Auto-convert if one value is initially passed and not the other
+        factor = self._gross_net_factor()
+        dp = int(getattr(self, "decimal_stepper", None).Value if hasattr(self, "decimal_stepper") else 2)
+        if brutto_val and not netto_val:
+            try:
+                b_f = float(str(brutto_val).replace(",", "."))
+                if factor > 0:
+                    netto_tb.Text = f"{b_f / factor:.{dp}f}"
+            except Exception:
+                pass
+        elif netto_val and not brutto_val:
+            try:
+                n_f = float(str(netto_val).replace(",", "."))
+                if factor > 0:
+                    brutto_tb.Text = f"{n_f * factor:.{dp}f}"
+            except Exception:
+                pass
+
+        def on_brutto_changed(s, e, r=rec):
+            if r["_updating"]:
+                return
+            raw = r["brutto_tb"].Text.strip().replace(",", ".")
+            if not raw:
+                return
+            try:
+                val = float(raw)
+                f = self._gross_net_factor()
+                if f > 0:
+                    dp_val = int(self.decimal_stepper.Value)
+                    r["_updating"] = True
+                    r["netto_tb"].Text = f"{val / f:.{dp_val}f}"
+                    r["_updating"] = False
+            except Exception:
+                pass
+
+        def on_netto_changed(s, e, r=rec):
+            if r["_updating"]:
+                return
+            raw = r["netto_tb"].Text.strip().replace(",", ".")
+            if not raw:
+                return
+            try:
+                val = float(raw)
+                f = self._gross_net_factor()
+                if f > 0:
+                    dp_val = int(self.decimal_stepper.Value)
+                    r["_updating"] = True
+                    r["brutto_tb"].Text = f"{val * f:.{dp_val}f}"
+                    r["_updating"] = False
+            except Exception:
+                pass
+
+        brutto_tb.TextChanged += on_brutto_changed
+        netto_tb.TextChanged += on_netto_changed
 
         def on_remove(s, e, r=rec):
             self._remove_target_row(r)
         rm_btn.Click += on_remove
 
         row.Items.Add(forms.StackLayoutItem(label_tb))
-        row.Items.Add(forms.StackLayoutItem(value_tb))
+        row.Items.Add(forms.StackLayoutItem(brutto_tb))
+        row.Items.Add(forms.StackLayoutItem(netto_tb))
         row.Items.Add(forms.StackLayoutItem(rm_btn))
 
         self._target_rows.append(rec)
@@ -2235,18 +2449,39 @@ class LinderoForm(forms.Form):
         self._refresh_targets_layout()
 
     def _targets_dict(self):
-        """(targets {label: float}, invalid_count) from the Settings table.
-        Decimal commas accepted; blank labels skipped."""
+        """(targets {label: {'brutto': float, 'netto': float}}, invalid_count)
+        from the Settings table. Decimal commas accepted; blank labels skipped."""
         targets, invalid = {}, 0
+        factor = self._gross_net_factor()
         for rec in self._target_rows:
             label = _clean_label(rec["label_tb"].Text)
-            raw   = rec["value_tb"].Text.strip().replace(",", ".")
+            raw_b = rec["brutto_tb"].Text.strip().replace(",", ".")
+            raw_n = rec["netto_tb"].Text.strip().replace(",", ".")
             if not label:
                 continue
-            try:
-                targets[label] = float(raw)
-            except (ValueError, TypeError):
-                invalid += 1
+
+            b_val = None
+            n_val = None
+
+            if raw_b:
+                try:
+                    b_val = float(raw_b)
+                except (ValueError, TypeError):
+                    invalid += 1
+            if raw_n:
+                try:
+                    n_val = float(raw_n)
+                except (ValueError, TypeError):
+                    invalid += 1
+
+            if b_val is not None and n_val is None and factor > 0:
+                n_val = b_val / factor
+            elif n_val is not None and b_val is None and factor > 0:
+                b_val = n_val * factor
+
+            if b_val is not None or n_val is not None:
+                targets[label] = {"brutto": b_val, "netto": n_val}
+
         return targets, invalid
 
     def _on_fill_targets_from_s3(self, _s, _e):
@@ -2261,7 +2496,7 @@ class LinderoForm(forms.Form):
         added = 0
         for cat in sorted(self._last_s3["category_overall"]):
             if cat != _lp.PLACEHOLDER and cat not in existing:
-                self._add_target_row(cat, "")
+                self._add_target_row(cat, "", "")
                 added += 1
         self.status_label.Text = (
             f"{added} categor{'y' if added == 1 else 'ies'} added — "
@@ -2537,12 +2772,23 @@ class LinderoForm(forms.Form):
 
         count = 0
         dp = int(self.decimal_stepper.Value)  # honor Settings decimal places
+        factor = self._gross_net_factor()
+        mode_idx = self._write_mode_dd.SelectedIndex
+
         for obj in objects:
             try:
                 guid   = System.Guid(obj["guid"])
                 rh_obj = sc.doc.Objects.FindId(guid)
                 if rh_obj:
-                    rh_obj.Attributes.SetUserString(key, f"{obj['area']:.{dp}f}")
+                    b_area = obj["area"]
+                    n_area = (b_area / factor) if factor > 0 else 0.0
+                    if mode_idx == 0:  # Brutto
+                        rh_obj.Attributes.SetUserString(key, f"{b_area:.{dp}f}")
+                    elif mode_idx == 1:  # Netto
+                        rh_obj.Attributes.SetUserString(key, f"{n_area:.{dp}f}")
+                    else:  # Both
+                        rh_obj.Attributes.SetUserString(f"{key}_Brutto", f"{b_area:.{dp}f}")
+                        rh_obj.Attributes.SetUserString(f"{key}_Netto", f"{n_area:.{dp}f}")
                     rh_obj.CommitChanges()
                     count += 1
             except Exception:
@@ -2550,7 +2796,8 @@ class LinderoForm(forms.Form):
 
         sc.doc.Views.Redraw()
         self._write_panel.Visible = False
-        self.status_label.Text = f"Area written to {count} object(s) using key '{key}'"
+        mode_names = ["Brutto area", "Netto area", f"Both ('{key}_Brutto' & '{key}_Netto')"]
+        self.status_label.Text = f"{mode_names[mode_idx]} written to {count} object(s) using key '{key}'"
         self.status_label.TextColor = _t.TEXT_OK
 
     # ------------------------------------------------------------------
@@ -2573,12 +2820,15 @@ class LinderoForm(forms.Form):
             "tolerance_percent": self.tolerance_stepper.Value,
             "decimal_places":    int(self.decimal_stepper.Value),
             "z_height_tol":      self.z_height_tol_stepper.Value,
+            "gross_net_factor":  self._gross_net_factor(),
             "ignore_prefix":     self._ignore_prefix(),
             "s3_parent_layer":   self._selected_layer(self.parent_layer_dd) or "",
             "s4_parent_layer":   self._selected_layer(self.parent_layer_s4_dd) or "",
             "s4_dimensions":     [[k, a] for k, a in self._s4_dims()],
             "r1_dimension":      _dim_serial(self.r1_dim_dd, self.r1_key_cb),
+            "r1_metric":         "netto" if self.r1_metric_dd.SelectedIndex == 1 else "brutto",
             "r2_dimension":      _dim_serial(self.r2_dim_dd, self.r2_key_cb),
+            "r2_metric":         "netto" if self.r2_metric_dd.SelectedIndex == 1 else "brutto",
             "targets":           self._targets_dict()[0],
         }
 
@@ -2589,6 +2839,7 @@ class LinderoForm(forms.Form):
         self.tolerance_stepper.Value    = float(cfg.get("tolerance_percent", 10.0))
         self.decimal_stepper.Value      = float(cfg.get("decimal_places", 2))
         self.z_height_tol_stepper.Value = float(cfg.get("z_height_tol", 0.5))
+        self.factor_stepper.Value       = float(cfg.get("gross_net_factor", 2.20))
         self.ignore_prefix_tb.Text      = cfg.get(
             "ignore_prefix", _lp.DEFAULT_IGNORE_PREFIX)
 
@@ -2611,13 +2862,24 @@ class LinderoForm(forms.Form):
                     self._s4_add_dim_row()
             self._apply_r_dim(cfg.get("r1_dimension"),
                               self.r1_dim_dd, self.r1_key_cb)
+            if hasattr(self, "r1_metric_dd"):
+                self.r1_metric_dd.SelectedIndex = 1 if cfg.get("r1_metric") == "netto" else 0
             self._apply_r_dim(cfg.get("r2_dimension"),
                               self.r2_dim_dd, self.r2_key_cb)
+            if hasattr(self, "r2_metric_dd"):
+                self.r2_metric_dd.SelectedIndex = 1 if cfg.get("r2_metric") == "netto" else 0
             targets = cfg.get("targets") or {}
             if targets:
                 self._clear_target_rows()
                 for label in sorted(targets):
-                    self._add_target_row(label, str(targets[label]))
+                    t_val = targets[label]
+                    if isinstance(t_val, dict):
+                        b_str = str(t_val.get("brutto", "")) if t_val.get("brutto") is not None else ""
+                        n_str = str(t_val.get("netto", "")) if t_val.get("netto") is not None else ""
+                    else:
+                        b_str = str(t_val) if t_val is not None else ""
+                        n_str = ""
+                    self._add_target_row(label, b_str, n_str)
         else:
             # v1 migration: key sequence becomes UserText dimensions;
             # target keys and the old data-source fields are obsolete.
@@ -2720,15 +2982,20 @@ class LinderoForm(forms.Form):
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
+        factor = self._gross_net_factor()
         self._populate_flat_grid(self.results_s1_grid, data)
         self._last_s1 = data["objects"]
         self._export_data = {
             "scenario": 1, "unit": unit,
             "params": {"name_key": name_key},
             "objects": data["objects"],
+            "factor": factor,
         }
+        tot_b = data['total']
+        tot_n = (tot_b / factor) if factor > 0 else 0.0
         self.status_label.Text = (
-            f"S1  —  {len(data['objects'])} object(s)  |  Total: {_fmt(data['total'])} {unit}"
+            f"S1  —  {len(data['objects'])} object(s)  |  "
+            f"Total: {_fmt(tot_b)} B / {_fmt(tot_n)} N {unit}"
         )
         self.status_label.TextColor = _t.TEXT_OK
 
@@ -2748,16 +3015,21 @@ class LinderoForm(forms.Form):
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
+        factor = self._gross_net_factor()
         self._populate_flat_grid(self.results_s2_grid, data)
         self._last_s2 = data
         self._export_data = {
             "scenario": 2, "unit": unit,
             "params": {"layer_name": layer_name, "obj_key": obj_key},
+            "factor": factor,
             **data,
         }
+        tot_b = data['total']
+        tot_n = (tot_b / factor) if factor > 0 else 0.0
         self.status_label.Text = (
             f"S2  —  '{short_name(layer_name)}'  |  "
-            f"{len(data['objects'])} object(s)  |  Total: {_fmt(data['total'])} {unit}"
+            f"{len(data['objects'])} object(s)  |  "
+            f"Total: {_fmt(tot_b)} B / {_fmt(tot_n)} N {unit}"
         )
         self.status_label.TextColor = _t.TEXT_OK
 
@@ -2783,6 +3055,7 @@ class LinderoForm(forms.Form):
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
+        factor = self._gross_net_factor()
         self._populate_s3_breakdown_grid(data)
         self._populate_s3_objects_grid(data)
         self._last_s3 = data
@@ -2795,13 +3068,16 @@ class LinderoForm(forms.Form):
             "category_overall": data["category_overall"],
             "layer_info": data["layer_info"],
             "warnings": data["warnings"],
+            "factor": factor,
         }
         n_warn = sum(len(d["warnings"]) for d in data["levels"].values())
         n_warn += len(data["warnings"])
+        ov_b = data['overall_total']
+        ov_n = (ov_b / factor) if factor > 0 else 0.0
         self.status_label.Text = (
             f"S3  —  '{short_name(parent)}'  |  "
             f"{len(data['levels'])} level(s)  |  "
-            f"Overall total: {_fmt(data['overall_total'])} {unit}"
+            f"Overall total: {_fmt(ov_b)} B / {_fmt(ov_n)} N {unit}"
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
         self.status_label.TextColor = _t.TEXT_WARN if n_warn else _t.TEXT_OK
@@ -2865,13 +3141,16 @@ class LinderoForm(forms.Form):
     def _populate_s4_grid(self, data):
         """Build TreeGridItemCollection from calc_s4 data and assign to grid."""
         collection = forms.TreeGridItemCollection()
+        factor = self._gross_net_factor()
 
         def add_nodes(parent_col, node_dict):
             for val in sorted(node_dict):
                 entry = node_dict[val]
                 has_children = bool(entry["children"])
                 item = forms.TreeGridItem()
-                item.Values = [val, _fmt(entry["area"]).rjust(10), 10 if has_children else 0]
+                b_area = entry["area"]
+                n_area = (b_area / factor) if factor > 0 else 0.0
+                item.Values = [val, _fmt(b_area).rjust(10), _fmt(n_area).rjust(10), 10 if has_children else 0]
                 item.Expanded = True
                 if has_children:
                     add_nodes(item.Children, entry["children"])
@@ -2879,8 +3158,10 @@ class LinderoForm(forms.Form):
 
         add_nodes(collection, data["tree"])
 
+        tot_b = data["overall_total"]
+        tot_n = (tot_b / factor) if factor > 0 else 0.0
         total_item = forms.TreeGridItem()
-        total_item.Values = ["OVERALL TOTAL", _fmt(data["overall_total"]).rjust(10), 30]
+        total_item.Values = ["OVERALL TOTAL", _fmt(tot_b).rjust(10), _fmt(tot_n).rjust(10), 30]
         collection.Add(total_item)
 
         self.results_s4_grid.DataStore = collection
@@ -2889,19 +3170,25 @@ class LinderoForm(forms.Form):
     # Shared grid factory
     # ------------------------------------------------------------------
 
-    def _make_results_grid(self, col_specs):
+    def _make_results_grid(self, col_specs, show_header=False):
         """
         Return a styled TreeGridView.
-        col_specs: list of (expand: bool, width_px: int) — one per data column.
+        col_specs: list of (header_text, expand: bool, width_px: int) or (expand, width) — one per data column.
         The last Values slot is always the hidden type-code; no column is added for it.
         """
         grid = forms.TreeGridView()
-        grid.ShowHeader = False
+        grid.ShowHeader = show_header
         grid.AllowColumnReordering = False
         grid.AllowMultipleSelection = False
         grid.Font = _t.F_MONO
-        for i, (expand, width) in enumerate(col_specs):
+        for i, spec in enumerate(col_specs):
+            if len(spec) == 3:
+                hdr_text, expand, width = spec
+            else:
+                hdr_text, expand, width = "", spec[0], spec[1]
             col = forms.GridColumn()
+            if hdr_text:
+                col.HeaderText = hdr_text
             col.Editable = False
             col.DataCell = forms.TextBoxCell(i)
             if expand:
@@ -2923,13 +3210,19 @@ class LinderoForm(forms.Form):
         S1 may also carry: layer_totals [{layer, area}], z_warning (str or None).
         """
         collection = forms.TreeGridItemCollection()
+        factor = self._gross_net_factor()
         raw_sum = sum(o["area"] for o in data["objects"])
+        raw_netto = (raw_sum / factor) if factor > 0 else 0.0
+
         for i, o in enumerate(data["objects"]):
             item = forms.TreeGridItem()
-            item.Values = [o["name"], _fmt(o["area"]).rjust(10), i % 2]
+            b_area = o["area"]
+            n_area = (b_area / factor) if factor > 0 else 0.0
+            item.Values = [o["name"], _fmt(b_area).rjust(10), _fmt(n_area).rjust(10), i % 2]
             collection.Add(item)
+
         sum_item = forms.TreeGridItem()
-        sum_item.Values = ["Sum (individual totals)", _fmt(raw_sum).rjust(10), 20]
+        sum_item.Values = ["Sum (individual totals)", _fmt(raw_sum).rjust(10), _fmt(raw_netto).rjust(10), 20]
         collection.Add(sum_item)
 
         layer_totals = data.get("layer_totals") or []
@@ -2937,28 +3230,33 @@ class LinderoForm(forms.Form):
         if multi_layer:
             for lt in layer_totals:
                 lt_item = forms.TreeGridItem()
-                lt_item.Values = [f"  {short_name(lt['layer'])}", _fmt(lt["area"]).rjust(10), 15]
+                lt_b = lt["area"]
+                lt_n = (lt_b / factor) if factor > 0 else 0.0
+                lt_item.Values = [f"  {short_name(lt['layer'])}", _fmt(lt_b).rjust(10), _fmt(lt_n).rjust(10), 15]
                 collection.Add(lt_item)
 
         union_note = "  [union failed — sum shown]" if not data["union_ok"] else ""
         total_label = "TOTAL (per-layer merged)" if multi_layer else "TOTAL (overlaps merged)"
+        tot_b = data["total"]
+        tot_n = (tot_b / factor) if factor > 0 else 0.0
         total_item = forms.TreeGridItem()
-        total_item.Values = [f"{total_label}{union_note}", _fmt(data["total"]).rjust(10), 30]
+        total_item.Values = [f"{total_label}{union_note}", _fmt(tot_b).rjust(10), _fmt(tot_n).rjust(10), 30]
         collection.Add(total_item)
 
         overlap = raw_sum - data["total"]
         if overlap > 1e-6 and not multi_layer:
+            overlap_n = (overlap / factor) if factor > 0 else 0.0
             w = forms.TreeGridItem()
-            w.Values = [f"  Overlap: {_fmt(overlap)} — some objects share footprint area", "", 40]
+            w.Values = [f"  Overlap: {_fmt(overlap)} B / {_fmt(overlap_n)} N — shared footprint", "", "", 40]
             collection.Add(w)
         z_warning = data.get("z_warning")
         if z_warning:
             w = forms.TreeGridItem()
-            w.Values = [f"  [!] {z_warning}", "", 40]
+            w.Values = [f"  [!] {z_warning}", "", "", 40]
             collection.Add(w)
         if data.get("skipped", 0) > 0:
             w = forms.TreeGridItem()
-            w.Values = [f"  {data['skipped']} object(s) skipped (no calculable footprint)", "", 40]
+            w.Values = [f"  {data['skipped']} object(s) skipped (no calculable footprint)", "", "", 40]
             collection.Add(w)
         grid.DataStore = collection
 
@@ -2970,43 +3268,53 @@ class LinderoForm(forms.Form):
         """Level rows with category children, building-wide category summary,
         overall total, and global warnings."""
         collection = forms.TreeGridItemCollection()
+        factor = self._gross_net_factor()
+
         for level, lv in data["levels"].items():
             union_note = "  [union failed]" if not lv["union_ok"] else ""
+            lv_b = lv["total"]
+            lv_n = (lv_b / factor) if factor > 0 else 0.0
             level_item = forms.TreeGridItem()
             level_item.Values = [
                 f"▸ {level}{union_note}",
-                _fmt(lv["total"]).rjust(10),
+                _fmt(lv_b).rjust(10),
+                _fmt(lv_n).rjust(10),
                 10,
             ]
             level_item.Expanded = True
             for i, (cat, ca) in enumerate(sorted(lv["category_totals"].items())):
                 child = forms.TreeGridItem()
-                child.Values = [f"  {cat}", _fmt(ca).rjust(10), i % 2]
+                ca_n = (ca / factor) if factor > 0 else 0.0
+                child.Values = [f"  {cat}", _fmt(ca).rjust(10), _fmt(ca_n).rjust(10), i % 2]
                 level_item.Children.Add(child)
             for w_text in lv["warnings"]:
                 w = forms.TreeGridItem()
-                w.Values = [f"  [!] {w_text}", "", 40]
+                w.Values = [f"  [!] {w_text}", "", "", 40]
                 level_item.Children.Add(w)
             collection.Add(level_item)
 
         if data["category_overall"]:
             cat_hdr = forms.TreeGridItem()
-            cat_hdr.Values = ["▸ CATEGORIES — whole building", "", 10]
+            cat_hdr.Values = ["▸ CATEGORIES — whole building", "", "", 10]
             cat_hdr.Expanded = True
             for i, (cat, ca) in enumerate(sorted(data["category_overall"].items())):
                 child = forms.TreeGridItem()
-                child.Values = [f"  {cat}", _fmt(ca).rjust(10), i % 2]
+                ca_n = (ca / factor) if factor > 0 else 0.0
+                child.Values = [f"  {cat}", _fmt(ca).rjust(10), _fmt(ca_n).rjust(10), i % 2]
                 cat_hdr.Children.Add(child)
             collection.Add(cat_hdr)
 
+        tot_b = data["overall_total"]
+        tot_n = (tot_b / factor) if factor > 0 else 0.0
         total_item = forms.TreeGridItem()
         total_item.Values = ["OVERALL TOTAL (sum of levels)",
-                             _fmt(data["overall_total"]).rjust(10), 30]
+                             _fmt(tot_b).rjust(10),
+                             _fmt(tot_n).rjust(10), 30]
         collection.Add(total_item)
 
         for w_text in data.get("warnings", []):
             w = forms.TreeGridItem()
-            w.Values = [f"  {w_text}", "", 40]
+            w.Values = [f"  {w_text}", "", "", 40]
             collection.Add(w)
         self.results_s3_breakdown_grid.DataStore = collection
 
@@ -3015,26 +3323,32 @@ class LinderoForm(forms.Form):
     # ------------------------------------------------------------------
 
     def _populate_s3_objects_grid(self, data):
-        """Level header rows with object children (name + category + area)."""
+        """Level header rows with object children (name + category + brutto + netto)."""
         collection = forms.TreeGridItemCollection()
+        factor = self._gross_net_factor()
+
         for level, lv in data["levels"].items():
             level_item = forms.TreeGridItem()
-            level_item.Values = [f"▸ {level}", "", "", 10]
+            level_item.Values = [f"▸ {level}", "", "", "", 10]
             level_item.Expanded = True
             for i, o in enumerate(lv["objects"]):
+                b_area = o["area"]
+                n_area = (b_area / factor) if factor > 0 else 0.0
                 child = forms.TreeGridItem()
                 child.Values = [o["name"], o["category"],
-                                _fmt(o["area"]).rjust(10), i % 2]
+                                _fmt(b_area).rjust(10),
+                                _fmt(n_area).rjust(10), i % 2]
                 level_item.Children.Add(child)
             individual_sum = sum(o["area"] for o in lv["objects"])
             overlap = individual_sum - lv["total"]
             if overlap > 1e-6:
+                overlap_n = (overlap / factor) if factor > 0 else 0.0
                 w = forms.TreeGridItem()
-                w.Values = [f"  Overlap: {_fmt(overlap)}", "", "", 40]
+                w.Values = [f"  Overlap: {_fmt(overlap)} B / {_fmt(overlap_n)} N", "", "", "", 40]
                 level_item.Children.Add(w)
             if lv.get("skipped", 0) > 0:
                 w = forms.TreeGridItem()
-                w.Values = [f"  {lv['skipped']} object(s) skipped", "", "", 40]
+                w.Values = [f"  {lv['skipped']} object(s) skipped", "", "", "", 40]
                 level_item.Children.Add(w)
             collection.Add(level_item)
         self.results_s3_objects_grid.DataStore = collection
@@ -3047,29 +3361,29 @@ class LinderoForm(forms.Form):
         """Dry-run view in the breakdown panel: counts, not areas."""
         collection = forms.TreeGridItemCollection()
         hdr = forms.TreeGridItem()
-        hdr.Values = ["PREVIEW — object counts (no areas computed)", "", 10]
+        hdr.Values = ["PREVIEW — object counts (no areas computed)", "", "", 10]
         collection.Add(hdr)
 
         for level in sorted(pv["tree"], key=_lp.level_sort_key):
             cats = pv["tree"][level]
             level_item = forms.TreeGridItem()
             level_item.Values = [f"▸ {level}",
-                                 str(sum(cats.values())).rjust(10), 10]
+                                 str(sum(cats.values())).rjust(10), "", 10]
             level_item.Expanded = True
             for i, cat in enumerate(sorted(cats)):
                 child = forms.TreeGridItem()
-                child.Values = [f"  {cat}", str(cats[cat]).rjust(10), i % 2]
+                child.Values = [f"  {cat}", str(cats[cat]).rjust(10), "", i % 2]
                 level_item.Children.Add(child)
             collection.Add(level_item)
 
         if pv["ignored"]:
             ign_item = forms.TreeGridItem()
             ign_item.Values = [f"▸ IGNORED (prefix '{prefix}')",
-                               str(len(pv["ignored"])).rjust(10), 10]
+                               str(len(pv["ignored"])).rjust(10), "", 10]
             ign_item.Expanded = True
             for i, lp_full in enumerate(pv["ignored"]):
                 child = forms.TreeGridItem()
-                child.Values = [f"  {lp_full}", "", 40]
+                child.Values = [f"  {lp_full}", "", "", 40]
                 ign_item.Children.Add(child)
             collection.Add(ign_item)
 
@@ -3077,7 +3391,7 @@ class LinderoForm(forms.Form):
             w = forms.TreeGridItem()
             w.Values = [
                 f"  [!] {pv['parent_direct_objects']} object(s) directly on "
-                "the parent layer — not measured", "", 40]
+                "the parent layer — not measured", "", "", 40]
             collection.Add(w)
         self.results_s3_breakdown_grid.DataStore = collection
 
@@ -3111,6 +3425,7 @@ class LinderoForm(forms.Form):
             self.status_label.TextColor = _t.TEXT_WARN
             return
 
+        factor = self._gross_net_factor()
         self._populate_s4_grid(data)
         self._last_s4 = data
         self._export_data = {
@@ -3120,12 +3435,15 @@ class LinderoForm(forms.Form):
                        "ignore_prefix": prefix},
             "tree": data["tree"],
             "overall_total": data["overall_total"],
+            "factor": factor,
         }
         n_warn = len(data["warnings"])
+        tot_b = data['overall_total']
+        tot_n = (tot_b / factor) if factor > 0 else 0.0
         self.status_label.Text = (
             f"S4  —  '{short_name(parent)}'  |  "
             + " > ".join(_dim_label(d) for d in dims)
-            + f"  |  Overall total: {_fmt(data['overall_total'])} {unit}"
+            + f"  |  Overall total: {_fmt(tot_b)} B / {_fmt(tot_n)} N {unit}"
             + (f"  |  {n_warn} warning(s)" if n_warn else "")
         )
         self.status_label.TextColor = (
@@ -3154,8 +3472,14 @@ class LinderoForm(forms.Form):
 
         targets, n_invalid = self._targets_dict()
         tol  = self.tolerance_stepper.Value / 100.0
+        factor = self._gross_net_factor()
+        metric_dd = getattr(self, tag.lower() + "_metric_dd", None)
+        metric = "netto" if (metric_dd and metric_dd.SelectedIndex == 1) else "brutto"
+
         data = calc_r(parent, dim, targets, self._ignore_prefix(),
-                      float(self.z_height_tol_stepper.Value))
+                      float(self.z_height_tol_stepper.Value),
+                      gross_net_factor=factor,
+                      metric=metric)
 
         if not data["entries"]:
             self.status_label.Text = (
@@ -3186,7 +3510,7 @@ class LinderoForm(forms.Form):
             warn_lbl.Visible = False
 
         self.status_label.Text = (
-            f"{tag}  [{_dim_label(dim)}]  —  {n} entr{'y' if n == 1 else 'ies'}"
+            f"{tag}  [{_dim_label(dim)} | {metric.upper()}]  —  {n} entr{'y' if n == 1 else 'ies'}"
             f"  |  Tolerance: {tol*100:.1f}%"
             + (f"  |  {len(warnings)} warning(s)" if warnings else "")
         )
@@ -3297,23 +3621,31 @@ def _col_widths(ws, widths):
 
 def _xl_s1(wb, data, unit):
     name_col = data["params"]["name_key"] or "Object Name"
+    factor   = data.get("factor", 2.20)
 
     ws = wb.create_sheet("Objects")
-    _col_widths(ws, [38, 32, 20])
-    row = _hdr(ws, 1, ["GUID", name_col, f"Footprint Area ({unit})"])
+    _col_widths(ws, [38, 32, 20, 20])
+    row = _hdr(ws, 1, ["GUID", name_col, f"Brutto Area ({unit})", f"Netto Area ({unit})"])
     for obj in data["objects"]:
+        b_area = obj["area"]
+        n_area = (b_area / factor) if factor > 0 else 0.0
         ws.cell(row, 1, obj["guid"])
         ws.cell(row, 2, obj["name"])
-        ws.cell(row, 3, obj["area"]).number_format = _AREA_FMT
+        ws.cell(row, 3, b_area).number_format = _AREA_FMT
+        ws.cell(row, 4, n_area).number_format = _AREA_FMT
         row += 1
 
     ws2 = wb.create_sheet("Summary")
     _col_widths(ws2, [36, 22])
     row = _hdr(ws2, 1, ["S1 — Selected Objects", f"[{unit}]"])
+    tot_b = sum(o["area"] for o in data["objects"])
+    tot_n = (tot_b / factor) if factor > 0 else 0.0
     pairs = [
-        ("Name Key used",        data["params"]["name_key"] or "(object name / GUID)"),
-        ("Object count",         len(data["objects"])),
-        ("Total footprint area", sum(o["area"] for o in data["objects"])),
+        ("Name Key used",            data["params"]["name_key"] or "(object name / GUID)"),
+        ("Gross / Net Factor",       factor),
+        ("Object count",             len(data["objects"])),
+        ("Total Brutto footprint",   tot_b),
+        ("Total Netto footprint",    tot_n),
     ]
     for label, value in pairs:
         lc = ws2.cell(row, 1, label)
@@ -3325,30 +3657,40 @@ def _xl_s1(wb, data, unit):
 
 
 def _xl_s2(wb, data, unit):
-    obj_col = data["params"]["obj_key"] or "Object Name"
-    layer   = data["params"]["layer_name"]
-    raw_sum = sum(o["area"] for o in data["objects"])
+    obj_col   = data["params"]["obj_key"] or "Object Name"
+    layer     = data["params"]["layer_name"]
+    factor    = data.get("factor", 2.20)
+    raw_sum_b = sum(o["area"] for o in data["objects"])
+    raw_sum_n = (raw_sum_b / factor) if factor > 0 else 0.0
+    tot_b     = data["total"]
+    tot_n     = (tot_b / factor) if factor > 0 else 0.0
 
     ws = wb.create_sheet("Objects")
-    _col_widths(ws, [38, 30, 32, 20])
-    row = _hdr(ws, 1, ["GUID", "Layer", obj_col, f"Footprint Area ({unit})"])
+    _col_widths(ws, [38, 30, 32, 20, 20])
+    row = _hdr(ws, 1, ["GUID", "Layer", obj_col, f"Brutto Area ({unit})", f"Netto Area ({unit})"])
     for obj in data["objects"]:
+        b_area = obj["area"]
+        n_area = (b_area / factor) if factor > 0 else 0.0
         ws.cell(row, 1, obj["guid"])
         ws.cell(row, 2, layer)
         ws.cell(row, 3, obj["name"])
-        ws.cell(row, 4, obj["area"]).number_format = _AREA_FMT
+        ws.cell(row, 4, b_area).number_format = _AREA_FMT
+        ws.cell(row, 5, n_area).number_format = _AREA_FMT
         row += 1
 
     ws2 = wb.create_sheet("Summary")
     _col_widths(ws2, [38, 22])
     row = _hdr(ws2, 1, ["S2 — By Layer", f"[{unit}]"])
     kv_rows = [
-        ("Layer",                              layer),
-        ("Object Key used",                    data["params"]["obj_key"] or "(object name / GUID)"),
-        ("Object count",                       len(data["objects"])),
-        (f"Sum of individual areas ({unit})",  raw_sum),
-        (f"Combined footprint ({unit})",       data["total"]),
-        ("Boolean Union succeeded",            "Yes" if data["union_ok"] else "No — sum shown"),
+        ("Layer",                                     layer),
+        ("Object Key used",                           data["params"]["obj_key"] or "(object name / GUID)"),
+        ("Gross / Net Factor",                        factor),
+        ("Object count",                              len(data["objects"])),
+        (f"Sum of individual areas (Brutto, {unit})", raw_sum_b),
+        (f"Sum of individual areas (Netto, {unit})",  raw_sum_n),
+        (f"Combined footprint (Brutto, {unit})",      tot_b),
+        (f"Combined footprint (Netto, {unit})",       tot_n),
+        ("Boolean Union succeeded",                   "Yes" if data["union_ok"] else "No — sum shown"),
     ]
     for label, value in kv_rows:
         lc = ws2.cell(row, 1, label)
@@ -3358,11 +3700,13 @@ def _xl_s2(wb, data, unit):
             vc.number_format = _AREA_FMT
         row += 1
 
-    overlap = raw_sum - data["total"]
-    if overlap > 1e-6:
+    overlap_b = raw_sum_b - tot_b
+    if overlap_b > 1e-6:
+        overlap_n = (overlap_b / factor) if factor > 0 else 0.0
         row += 1
         row = _sec(ws2, row, "[!] Overlap Warning", n_cols=2)
-        row = _warn(ws2, row, "Overlapping area (sum - total)", overlap)
+        row = _warn(ws2, row, "Overlapping Brutto Area", overlap_b)
+        row = _warn(ws2, row, "Overlapping Netto Area", overlap_n)
         row = _warn(ws2, row, "Some objects share footprint area. Verify whether double-counting is intentional.")
 
 
@@ -3371,23 +3715,27 @@ def _xl_s3(wb, data, unit):
     obj_col = params["obj_key"] or "Object Name"
     parent  = params["parent"]
     levels  = data["levels"]
+    factor  = data.get("factor", 2.20)
 
     # ── Sheet 1: Objects — flat, pivot-ready ─────────────────────────
     ws = wb.create_sheet("Objects")
-    _col_widths(ws, [38, 28, 22, 28, 30, 20])
+    _col_widths(ws, [38, 28, 22, 28, 30, 20, 20])
     row = _hdr(ws, 1, ["GUID", "Parent Layer", "Level", "Category", obj_col,
-                       f"Footprint Area ({unit})"])
+                       f"Brutto Area ({unit})", f"Netto Area ({unit})"])
     for level, lv in levels.items():
         for obj in lv["objects"]:
+            b_area = obj["area"]
+            n_area = (b_area / factor) if factor > 0 else 0.0
             ws.cell(row, 1, obj["guid"])
             ws.cell(row, 2, parent)
             ws.cell(row, 3, level)
             ws.cell(row, 4, obj["category"])
             ws.cell(row, 5, obj["name"])
-            ws.cell(row, 6, obj["area"]).number_format = _AREA_FMT
+            ws.cell(row, 6, b_area).number_format = _AREA_FMT
+            ws.cell(row, 7, n_area).number_format = _AREA_FMT
             row += 1
 
-    # ── Sheet 2: Summary — Level × Category matrix ───────────────────
+    # ── Sheet 2: Summary — Level × Category matrices ─────────────────
     cats = sorted({c for lv in levels.values() for c in lv["category_totals"]})
     n_cols = len(cats) + 2  # Level | categories… | Level Total
 
@@ -3396,16 +3744,18 @@ def _xl_s3(wb, data, unit):
     row = _hdr(ws2, 1, ["S3 — Layer Hierarchy", f"[{unit}]"])
 
     for label, value in [
-        ("Parent Layer",  parent),
-        ("Object Key",    params["obj_key"] or "(object name / GUID)"),
-        ("Ignore Prefix", params.get("ignore_prefix", "")),
+        ("Parent Layer",       parent),
+        ("Object Key",         params["obj_key"] or "(object name / GUID)"),
+        ("Ignore Prefix",      params.get("ignore_prefix", "")),
+        ("Gross / Net Factor", factor),
     ]:
         ws2.cell(row, 1, label).font = Font(bold=True)
         ws2.cell(row, 2, value)
         row += 1
     row += 1
 
-    row = _sec(ws2, row, "Combined Footprint — Level × Category", n_cols=n_cols)
+    # 1. Brutto Matrix
+    row = _sec(ws2, row, "Combined Footprint (BRUTTO) — Level × Category", n_cols=n_cols)
     ws2.cell(row, 1, "Level").font = Font(bold=True)
     for ci, cat in enumerate(cats, 2):
         ws2.cell(row, ci, cat).font = Font(bold=True)
@@ -3424,9 +3774,8 @@ def _xl_s3(wb, data, unit):
         tc.number_format = _AREA_FMT
         row += 1
 
-    # Bottom row: per-category building totals + grand total
     cat_overall = data.get("category_overall", {})
-    lc = ws2.cell(row, 1, "CATEGORY TOTAL (all levels)")
+    lc = ws2.cell(row, 1, "CATEGORY TOTAL (Brutto)")
     lc.font = _TOT_FONT
     lc.fill = _TOT_FILL
     for ci, cat in enumerate(cats, 2):
@@ -3440,8 +3789,44 @@ def _xl_s3(wb, data, unit):
     gc.number_format = _AREA_FMT
     row += 2
 
-    # Note: Σ(category totals) ≥ level total when categories overlap —
-    # the matrix keeps both readings visible.
+    # 2. Netto Matrix
+    row = _sec(ws2, row, f"Combined Footprint (NETTO, Factor = {factor:.2f}) — Level × Category", n_cols=n_cols)
+    ws2.cell(row, 1, "Level").font = Font(bold=True)
+    for ci, cat in enumerate(cats, 2):
+        ws2.cell(row, ci, cat).font = Font(bold=True)
+    ws2.cell(row, n_cols, "Level Total").font = Font(bold=True)
+    row += 1
+
+    for level, lv in levels.items():
+        note = "" if lv["union_ok"] else " [union failed]"
+        ws2.cell(row, 1, level + note)
+        for ci, cat in enumerate(cats, 2):
+            if cat in lv["category_totals"]:
+                val_n = (lv["category_totals"][cat] / factor) if factor > 0 else 0.0
+                c = ws2.cell(row, ci, val_n)
+                c.number_format = _AREA_FMT
+        lv_tot_n = (lv["total"] / factor) if factor > 0 else 0.0
+        tc = ws2.cell(row, n_cols, lv_tot_n)
+        tc.font          = _TOT_FONT
+        tc.number_format = _AREA_FMT
+        row += 1
+
+    lc = ws2.cell(row, 1, "CATEGORY TOTAL (Netto)")
+    lc.font = _TOT_FONT
+    lc.fill = _TOT_FILL
+    for ci, cat in enumerate(cats, 2):
+        c_val = (cat_overall.get(cat, 0.0) / factor) if factor > 0 else 0.0
+        c = ws2.cell(row, ci, c_val)
+        c.font          = _TOT_FONT
+        c.fill          = _TOT_FILL
+        c.number_format = _AREA_FMT
+    ov_n = (data["overall_total"] / factor) if factor > 0 else 0.0
+    gc = ws2.cell(row, n_cols, ov_n)
+    gc.font          = _TOT_FONT
+    gc.fill          = _TOT_FILL
+    gc.number_format = _AREA_FMT
+    row += 2
+
     warn_rows = []
     for level, lv in levels.items():
         for w_text in lv["warnings"]:
@@ -3458,21 +3843,21 @@ def _xl_s4(wb, data, unit):
     """
     S4 Custom Aggregation Excel export.
     Sheet 'Leaf Data': flat table — one row per unique key path (leaf), with
-    one column per key level plus an area column. Useful for pivot tables.
+    one column per key level plus Brutto and Netto area columns. Useful for pivot tables.
     Sheet 'Tree Summary': indented hierarchy showing subtotals at each node.
     """
     params   = data["params"]
     parent   = params["parent"]
-    # v2 stores dimension labels; fall back to the v1 key list if present.
     key_seq  = params.get("dim_labels") or params.get("key_sequence") or []
     depth    = len(key_seq)
     key_path = " > ".join(key_seq)
+    factor   = data.get("factor", 2.20)
 
     # ── Sheet 1: Leaf Data ───────────────────────────────────────────
     ws = wb.create_sheet("Leaf Data")
-    col_widths = [22] * depth + [20]
+    col_widths = [22] * depth + [20, 20]
     _col_widths(ws, col_widths)
-    header_cols = list(key_seq) + [f"Area ({unit})"]
+    header_cols = list(key_seq) + [f"Brutto Area ({unit})", f"Netto Area ({unit})"]
     row = _hdr(ws, 1, header_cols)
 
     def write_leaves(node, path_so_far):
@@ -3483,21 +3868,23 @@ def _xl_s4(wb, data, unit):
             if entry["children"]:
                 write_leaves(entry["children"], current_path)
             else:
-                # Leaf row: fill each key column
                 for ci, pv in enumerate(current_path, 1):
                     ws.cell(row, ci, pv)
-                ws.cell(row, depth + 1, entry["area"]).number_format = _AREA_FMT
+                b_area = entry["area"]
+                n_area = (b_area / factor) if factor > 0 else 0.0
+                ws.cell(row, depth + 1, b_area).number_format = _AREA_FMT
+                ws.cell(row, depth + 2, n_area).number_format = _AREA_FMT
                 row += 1
 
     write_leaves(data["tree"], [])
 
     # ── Sheet 2: Tree Summary ────────────────────────────────────────
     ws2 = wb.create_sheet("Tree Summary")
-    _col_widths(ws2, [52, 22])
-    row2 = _hdr(ws2, 1, ["S4 — Custom Aggregation", f"Area ({unit})"])
+    _col_widths(ws2, [52, 22, 22])
+    row2 = _hdr(ws2, 1, ["S4 — Custom Aggregation", f"Brutto ({unit})", f"Netto ({unit})"])
 
     # Header info rows
-    for lbl, val in [("Parent Layer", parent), ("Key Hierarchy", key_path)]:
+    for lbl, val in [("Parent Layer", parent), ("Key Hierarchy", key_path), ("Gross / Net Factor", factor)]:
         ws2.cell(row2, 1, lbl).font = Font(bold=True)
         ws2.cell(row2, 2, val)
         row2 += 1
@@ -3511,13 +3898,19 @@ def _xl_s4(wb, data, unit):
             is_leaf = not entry["children"]
             label = f"{indent}{'▸ ' if not is_leaf else '  '}{val}"
             lc = ws2.cell(row2, 1, label)
-            vc = ws2.cell(row2, 2, entry["area"])
-            vc.number_format = _AREA_FMT
+            b_area = entry["area"]
+            n_area = (b_area / factor) if factor > 0 else 0.0
+            vc_b = ws2.cell(row2, 2, b_area)
+            vc_b.number_format = _AREA_FMT
+            vc_n = ws2.cell(row2, 3, n_area)
+            vc_n.number_format = _AREA_FMT
             if not is_leaf:
                 lc.font = Font(bold=True)
                 lc.fill = _SEC_FILL
-                vc.font = Font(bold=True)
-                vc.fill = _SEC_FILL
+                vc_b.font = Font(bold=True)
+                vc_b.fill = _SEC_FILL
+                vc_n.font = Font(bold=True)
+                vc_n.fill = _SEC_FILL
             row2 += 1
             if entry["children"]:
                 write_tree_rows(entry["children"], level + 1)
@@ -3526,13 +3919,19 @@ def _xl_s4(wb, data, unit):
     row2 += 1
 
     # Overall total
+    ov_b = data["overall_total"]
+    ov_n = (ov_b / factor) if factor > 0 else 0.0
     lc = ws2.cell(row2, 1, "OVERALL TOTAL")
     lc.font = _TOT_FONT
     lc.fill = _TOT_FILL
-    vc = ws2.cell(row2, 2, data["overall_total"])
-    vc.font          = _TOT_FONT
-    vc.fill          = _TOT_FILL
-    vc.number_format = _AREA_FMT
+    vc_b = ws2.cell(row2, 2, ov_b)
+    vc_b.font          = _TOT_FONT
+    vc_b.fill          = _TOT_FILL
+    vc_b.number_format = _AREA_FMT
+    vc_n = ws2.cell(row2, 3, ov_n)
+    vc_n.font          = _TOT_FONT
+    vc_n.fill          = _TOT_FILL
+    vc_n.number_format = _AREA_FMT
 
 
 def export_to_excel(data, filepath):

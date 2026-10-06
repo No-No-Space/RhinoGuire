@@ -85,9 +85,9 @@ Default: `Layer @ 1 → Layer @ 2` (Level → Category — matches the contract 
 Footprints are merged per leaf group per level, then summed across levels. Results as an indented tree with cumulative areas per node.
 
 ### R1 / R2 — Analysis
-One shared engine, two tabs so two setups can coexist (e.g. R1 per category, R2 per level). Each tab picks its **Aggregate by** dimension: `Category (layer)`, `Level (layer)`, or a `UserText key`. Scope = the **S3 Parent Layer**.
+One shared engine, two tabs so two setups can coexist (e.g. R1 per category, R2 per level). Each tab picks its **Aggregate by** dimension (`Category (layer)`, `Level (layer)`, or a `UserText key`) and **Compare** metric (`Brutto (BGF)` or `Netto (NF)`). Scope = the **S3 Parent Layer**.
 
-Merged areas are aggregated across all levels and compared against the **Target Areas** table (Settings) as bullet charts with the ± tolerance zones. Labels without a target chart as "(no target)" and warn. Charts export as PNG.
+Merged areas are aggregated across all levels and compared against the **Target Areas** table (Settings) as bullet charts with the ± tolerance zones. When comparing Netto, measured areas are converted using the Gross / Net factor and compared to the Netto goals. Labels without a target chart as "(no target)" and warn. Charts export as PNG.
 
 ---
 
@@ -95,11 +95,12 @@ Merged areas are aggregated across all levels and compared against the **Target 
 
 | Setting | Meaning |
 | --- | --- |
+| **Gross / Net Factor** | Conversion ratio between gross (Brutto) and net (Netto) floor area ($Netto = Brutto / Factor$). Default `2.20`. |
 | **Ignore Prefix** | Default `_`. Excludes matching layers and their whole subtree (S3, S4, R1, R2). |
 | **Global Tolerance (%)** | Symmetric tolerance for the R1/R2 bullet charts. Default 10%. |
 | **Decimal Places** | 0–4, applies to all displayed results. |
 | **Z-Height Tolerance** | Min. Z gap (model units) to treat objects in one group as separate floors before merging. Applies to all scenarios. |
-| **Target Areas** | Label → target value rows for R1/R2. Label must match the aggregation value (category layer name, level name, or key value). Decimal comma accepted. **Fill from last S3** seeds rows from the last S3 result's categories. |
+| **Target Areas** | Label → **Brutto Goal** & **Netto Goal** rows for R1/R2. Entering or editing one goal automatically calculates the other using the Gross / Net factor. Decimal comma accepted. **Fill from last S3** seeds rows from the last S3 result's categories. |
 
 ### Configuration (config v2)
 
@@ -113,13 +114,19 @@ Settings **persist automatically per model**: when the window closes (and whenev
   "tolerance_percent": 10.0,
   "decimal_places": 2,
   "z_height_tol": 0.5,
+  "gross_net_factor": 2.2,
   "ignore_prefix": "_",
   "s3_parent_layer": "07-PROPOSAL-Phase_03",
   "s4_parent_layer": "07-PROPOSAL-Phase_03",
   "s4_dimensions": [["layer", 1], ["layer", 2]],
   "r1_dimension": ["category", null],
+  "r1_metric": "brutto",
   "r2_dimension": ["level", null],
-  "targets": {"Pflege": 1200.0, "Diagnostik und Therapie": 2400.0}
+  "r2_metric": "netto",
+  "targets": {
+    "Pflege": {"brutto": 2640.0, "netto": 1200.0},
+    "Diagnostik und Therapie": {"brutto": 5280.0, "netto": 2400.0}
+  }
 }
 ```
 
@@ -154,28 +161,29 @@ Each row in R1/R2 is drawn as follows (left to right):
 The **"Write Area to Objects"** button opens an inline panel below the button row (S1–S4):
 
 1. Choose or type the user text key to write to (default: `Area`).
-2. Click **Confirm Write**.
+2. Select the **Mode**: `Brutto Area`, `Netto Area`, or `Both` (writes `<Key>_Brutto` and `<Key>_Netto`).
+3. Click **Confirm Write**.
 
 The calculated footprint area is written as a user string to each measured object using `SetUserString`. If the key does not yet exist on an object, it is created. The operation is one-way — no automatic sync; click again to update after recalculating.
 
-Status bar confirms: `Area written to N object(s) using key 'Area'`.
+Status bar confirms: `Brutto area written to N object(s) using key 'Area'`.
 
 ---
 
 ## Export to Excel
 
-Available for S1, S2, S3, and S4.
+Available for S1, S2, S3, and S4. All workbooks include side-by-side **Brutto Area** and **Netto Area** columns.
 
-**S1, S2** workbooks: an **Objects** sheet (one row per object) and a **Summary** sheet (parameters, totals, overlap warnings).
+**S1, S2** workbooks: an **Objects** sheet (one row per object with Brutto & Netto) and a **Summary** sheet (parameters, Gross/Net factor, totals, overlap warnings).
 
 **S3** workbooks:
 
 | Sheet | Contents |
 | --- | --- |
-| **Objects** | Flat, pivot-ready — GUID, parent, **Level**, **Category**, label, area |
-| **Summary** | **Level × Category matrix**: levels as rows, categories as columns, level totals on the right, building-wide category totals + grand total at the bottom, warnings highlighted in amber |
+| **Objects** | Flat, pivot-ready — GUID, parent, **Level**, **Category**, label, **Brutto Area**, **Netto Area** |
+| **Summary** | Parameter header (including Gross / Net Factor) + two full matrices: **Combined Footprint (BRUTTO) — Level × Category** and **Combined Footprint (NETTO) — Level × Category**, with level totals, building-wide category totals, grand totals, and warnings |
 
-**S4** workbooks: **Leaf Data** (one row per unique dimension path — pivot-ready) and **Tree Summary** (indented hierarchy with cumulative areas). Column headers use the dimension labels (e.g. `Layer @ 1`).
+**S4** workbooks: **Leaf Data** (one row per unique dimension path with Brutto & Netto — pivot-ready) and **Tree Summary** (indented hierarchy with cumulative Brutto & Netto areas). Column headers use the dimension labels (e.g. `Layer @ 1`).
 
 ---
 
