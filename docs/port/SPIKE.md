@@ -2,7 +2,7 @@
 
 Date: 2026-11-25. Rhino 8.37.26307.15001 on .NET 10.0.15, Windows 11. Started by Antigravity (Gemini), finished by Claude.
 
-All automated checks pass. Three checks need a person at the keyboard; they are listed under [Manual checks for Gate 0](#manual-checks-for-gate-0).
+All automated checks pass, and Aksel's three manual checks passed. **Gate 0 passed on 2026-11-25**: the target framework (`net7.0-windows`), the RhinoCommon floor (8.21) and on-demand loading stand as recorded below.
 
 ## Results
 
@@ -55,7 +55,7 @@ To remove the dev registration later: close Rhino, then delete the registry key 
 - **WP-1C.** Off-screen rendering works without docking, so `RGUiSnapshot` can render any panel type without opening it in Rhino.
 - **WP-1D.** External skins can ship fonts and style `RhinoGuire.UI` types from loose XAML. Loose XAML can't have code-behind (`x:Class`), as planned.
 - **WP-4A.** The plugin's `bin` contains a `System.IO.Packaging.dll` from ClosedXML's dependency graph that Rhino never loads (the runtime's copy wins). It can be left out of the Yak package once the release build is checked.
-- The spawned Rhino docks new panels small (190 × 173 px); size panels with a minimum width rather than relying on the dock.
+- **Panel size on first open (WP-1C, then every tool WP).** New panels open small: 190 × 173 px in a spawned Rhino, and Aksel found the spike panel small in his own Rhino too. Give each tool panel a sensible size on first open (a minimum width, or the dock size Rhino offers when registering the panel) and check it as part of each tool's smoke test. Raised at Gate 0, deferred to the tool work.
 
 ## Manual checks for Gate 0
 
@@ -69,6 +69,8 @@ In your own Rhino 8 (the plugin is already registered):
 
 | Manual check | Result | Notes |
 | --- | --- | --- |
-| Typing reaches the textbox | | |
-| Pick from a panel button | | |
-| Esc cancels the pick | | |
+| Typing reaches the textbox | success | |
+| Pick from a panel button | success | |
+| Esc cancels the pick | success | |
+
+Aksel's note at Gate 0: the panel opens small. Tracked under *Findings for later work packages*.
