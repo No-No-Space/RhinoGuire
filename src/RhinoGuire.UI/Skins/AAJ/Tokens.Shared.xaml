@@ -1,0 +1,19 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <!-- WP-0 spike subset. WP-1A replaces this file with the output of tools/build_aaj_skin.py. -->
+
+    <!-- Fonts embedded in RhinoGuire.UI (Skins/AAJ/Fonts, OFL). The name after # is the font's internal family name. -->
+    <FontFamily x:Key="FontHeading">pack://application:,,,/RhinoGuire.UI;component/Skins/AAJ/Fonts/#Gully</FontFamily>
+    <FontFamily x:Key="FontBody">pack://application:,,,/RhinoGuire.UI;component/Skins/AAJ/Fonts/#Moderustic</FontFamily>
+    <FontFamily x:Key="FontMono">pack://application:,,,/RhinoGuire.UI;component/Skins/AAJ/Fonts/#Fliege Mono</FontFamily>
+
+    <!-- Metrics -->
+    <sys:Double x:Key="FontSizeBody">14.5</sys:Double>
+    <sys:Double x:Key="FontSizeSmall">13</sys:Double>
+    <sys:Double x:Key="FontSizeLabel">11</sys:Double>
+    <sys:Double x:Key="FontSizeHeading">18</sys:Double>
+    <sys:Double x:Key="ControlHeight">40</sys:Double>
+    <Thickness x:Key="ControlBorderThickness">2</Thickness>
+    <CornerRadius x:Key="ControlCornerRadius">0</CornerRadius>
+</ResourceDictionary>

@@ -197,4 +197,14 @@ ui/RhinoGuire.rui
 *.afphoto
 *.afpub
 *~lock~
-*.af*~lock~
+*.af*~lock~
+
+# Design-system sources and the internal skin: never commit (see docs/port/PLAN.md)
+_Skills/
+skins/White/
+
+# .NET / C# build outputs
+bin/
+obj/
+*.rhp
+*.yak

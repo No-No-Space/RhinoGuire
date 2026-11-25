@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <TargetExt>.rhp</TargetExt>
+    <AssemblyName>RhinoGuire</AssemblyName>
+    <RootNamespace>RhinoGuire.Plugin</RootNamespace>
+    <NoWarn>NU1701</NoWarn>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Yak / Assembly metadata -->
+    <Title>RhinoGuire</Title>
+    <Description>Architectural and site design tools for Rhinoceros 8</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RhinoGuire.Core\RhinoGuire.Core.csproj" />
+    <ProjectReference Include="..\RhinoGuire.Engine\RhinoGuire.Engine.csproj" />
+    <ProjectReference Include="..\RhinoGuire.UI\RhinoGuire.UI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="RhinoCommon" Version="$(RhinoCommonVersion)" ExcludeAssets="runtime" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,44 @@
+<UserControl x:Class="RhinoGuire.Plugin.SpikePanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="640" d:DesignWidth="340"
+             Background="{DynamicResource SurfacePage}">
+    <!-- WP-0 spike panel: the manual checks for Gate 0. Automated checks live in RGSpikeTest. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="16">
+            <TextBlock x:Name="HeadingText"
+                       Text="RhinoGuire spike"
+                       Style="{DynamicResource SpikeTextBlock}"
+                       FontFamily="{DynamicResource FontHeading}"
+                       FontSize="{DynamicResource FontSizeHeading}"
+                       FontWeight="Bold" />
+            <TextBlock Text="Manual checks for Gate 0. The automated checks run with the RGSpikeTest command."
+                       Style="{DynamicResource SpikeTextBlock}"
+                       Foreground="{DynamicResource TextSecondary}"
+                       FontSize="{DynamicResource FontSizeSmall}"
+                       Margin="0,4,0,0" />
+
+            <TextBlock Text="1 · TYPING" Style="{DynamicResource SpikeLabel}" />
+            <TextBlock Style="{DynamicResource SpikeTextBlock}" FontSize="{DynamicResource FontSizeSmall}"
+                       Text="Click in the box, type a few letters, then press Enter. The letters should appear here, not on Rhino's command line, and Enter should not run a command." />
+            <TextBox x:Name="SpikeTextBox" Style="{DynamicResource SpikeTextBox}" />
+
+            <TextBlock Text="2 · PICK FROM A PANEL BUTTON" Style="{DynamicResource SpikeLabel}" />
+            <TextBlock Style="{DynamicResource SpikeTextBlock}" FontSize="{DynamicResource FontSizeSmall}"
+                       Text="Click the button, then click any object in a viewport. Its id should appear below and Rhino should stay responsive." />
+            <Button x:Name="PickButton" Content="Pick object" Style="{DynamicResource SpikeButton}"
+                    HorizontalAlignment="Left" Click="OnPickObjectClicked" />
+            <TextBlock x:Name="PickStatusText" Text="No object picked." Style="{DynamicResource SpikeTextBlock}"
+                       FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeSmall}" />
+
+            <TextBlock Text="3 · THEME" Style="{DynamicResource SpikeLabel}" />
+            <Button x:Name="ThemeButton" Content="Toggle dark / light" Style="{DynamicResource SpikeButton}"
+                    HorizontalAlignment="Left" Click="OnToggleThemeClicked" />
+            <TextBlock x:Name="ThemeStatusText" Text="Theme: light" Style="{DynamicResource SpikeTextBlock}"
+                       FontSize="{DynamicResource FontSizeSmall}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

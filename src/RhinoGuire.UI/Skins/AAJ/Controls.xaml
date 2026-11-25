@@ -1,0 +1,60 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- WP-0 spike styles only. WP-1A replaces them with the Tool.* styles in docs/port/SKIN_CONTRACT.md. -->
+
+    <Style x:Key="SpikeButton" TargetType="Button">
+        <Setter Property="MinHeight" Value="{DynamicResource ControlHeight}" />
+        <Setter Property="Background" Value="{DynamicResource UiDefault}" />
+        <Setter Property="Foreground" Value="{DynamicResource UiOn}" />
+        <Setter Property="BorderThickness" Value="{DynamicResource ControlBorderThickness}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderControl}" />
+        <Setter Property="FontFamily" Value="{DynamicResource FontHeading}" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Padding" Value="18,9" />
+        <Setter Property="Margin" Value="0,4" />
+        <!-- Own template: the default WPF button chrome paints its own rounded, blue hover state. -->
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{DynamicResource ControlCornerRadius}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SpikeTextBox" TargetType="TextBox">
+        <Setter Property="MinHeight" Value="{DynamicResource ControlHeight}" />
+        <Setter Property="Background" Value="{DynamicResource SurfaceSubtle}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource TextPrimary}" />
+        <Setter Property="BorderThickness" Value="{DynamicResource ControlBorderThickness}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderControl}" />
+        <Setter Property="FontFamily" Value="{DynamicResource FontBody}" />
+        <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Padding" Value="8,4" />
+        <Setter Property="Margin" Value="0,4" />
+    </Style>
+
+    <Style x:Key="SpikeTextBlock" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontFamily" Value="{DynamicResource FontBody}" />
+        <Setter Property="FontSize" Value="{DynamicResource FontSizeBody}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!-- Mono uppercase label, AAJ field-label style. Text is typed in capitals: WPF has no text-transform. -->
+    <Style x:Key="SpikeLabel" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+        <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+        <Setter Property="FontSize" Value="{DynamicResource FontSizeLabel}" />
+        <Setter Property="Margin" Value="0,12,0,2" />
+    </Style>
+</ResourceDictionary>

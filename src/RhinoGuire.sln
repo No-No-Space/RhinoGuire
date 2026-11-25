@@ -1,0 +1,46 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoGuire.Core", "RhinoGuire.Core\RhinoGuire.Core.csproj", "{ECA93FB3-2260-4F3A-AE97-8D8243A51586}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoGuire.Core.Tests", "RhinoGuire.Core.Tests\RhinoGuire.Core.Tests.csproj", "{F2758144-AA00-47BC-B637-51C793DD7DC9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoGuire.Engine", "RhinoGuire.Engine\RhinoGuire.Engine.csproj", "{18096459-3718-425E-BFD1-7025E19A6D9F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoGuire.UI", "RhinoGuire.UI\RhinoGuire.UI.csproj", "{04A4B2FD-D8C1-4682-BB13-AEBFFE23380E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoGuire.Plugin", "RhinoGuire.Plugin\RhinoGuire.Plugin.csproj", "{FFA645D5-DD86-4069-A629-42861ED03584}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{ECA93FB3-2260-4F3A-AE97-8D8243A51586}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ECA93FB3-2260-4F3A-AE97-8D8243A51586}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ECA93FB3-2260-4F3A-AE97-8D8243A51586}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ECA93FB3-2260-4F3A-AE97-8D8243A51586}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F2758144-AA00-47BC-B637-51C793DD7DC9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F2758144-AA00-47BC-B637-51C793DD7DC9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F2758144-AA00-47BC-B637-51C793DD7DC9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F2758144-AA00-47BC-B637-51C793DD7DC9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{18096459-3718-425E-BFD1-7025E19A6D9F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{18096459-3718-425E-BFD1-7025E19A6D9F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{18096459-3718-425E-BFD1-7025E19A6D9F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{18096459-3718-425E-BFD1-7025E19A6D9F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{04A4B2FD-D8C1-4682-BB13-AEBFFE23380E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{04A4B2FD-D8C1-4682-BB13-AEBFFE23380E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{04A4B2FD-D8C1-4682-BB13-AEBFFE23380E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{04A4B2FD-D8C1-4682-BB13-AEBFFE23380E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FFA645D5-DD86-4069-A629-42861ED03584}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FFA645D5-DD86-4069-A629-42861ED03584}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FFA645D5-DD86-4069-A629-42861ED03584}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FFA645D5-DD86-4069-A629-42861ED03584}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

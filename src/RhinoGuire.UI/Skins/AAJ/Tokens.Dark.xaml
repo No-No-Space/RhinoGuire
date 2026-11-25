@@ -1,0 +1,29 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- WP-0 spike subset, values from _Skills/AAJ Design System/tokens.json.
+         WP-1A replaces this file with the output of tools/build_aaj_skin.py. -->
+
+    <Color x:Key="ColorSurfacePage">#1A1816</Color>      <!-- bg-page-dark -->
+    <SolidColorBrush x:Key="SurfacePage" Color="{StaticResource ColorSurfacePage}" />
+
+    <Color x:Key="ColorSurfaceSubtle">#36322E</Color>    <!-- bg-surface-dark -->
+    <SolidColorBrush x:Key="SurfaceSubtle" Color="{StaticResource ColorSurfaceSubtle}" />
+
+    <Color x:Key="ColorTextPrimary">#F2EDE6</Color>      <!-- text-primary-dark -->
+    <SolidColorBrush x:Key="TextPrimary" Color="{StaticResource ColorTextPrimary}" />
+
+    <Color x:Key="ColorTextSecondary">#A8A39E</Color>    <!-- text-secondary-dark -->
+    <SolidColorBrush x:Key="TextSecondary" Color="{StaticResource ColorTextSecondary}" />
+
+    <Color x:Key="ColorBorderControl">#F2EDE6</Color>    <!-- color-border-dark -->
+    <SolidColorBrush x:Key="BorderControl" Color="{StaticResource ColorBorderControl}" />
+
+    <Color x:Key="ColorUiDefault">#F2EDE6</Color>        <!-- primary button fill, dark -->
+    <SolidColorBrush x:Key="UiDefault" Color="{StaticResource ColorUiDefault}" />
+
+    <Color x:Key="ColorUiOn">#2A2725</Color>             <!-- text on primary fill, dark -->
+    <SolidColorBrush x:Key="UiOn" Color="{StaticResource ColorUiOn}" />
+
+    <Color x:Key="ColorFocusRing">#4DA8B8</Color>        <!-- focus-ring-dark -->
+    <SolidColorBrush x:Key="FocusRing" Color="{StaticResource ColorFocusRing}" />
+</ResourceDictionary>

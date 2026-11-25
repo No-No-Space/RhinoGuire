@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Version>0.1.0</Version>
+    <Authors>Aksel Alvarez</Authors>
+    <Company>AAJ Studio</Company>
+    <Product>RhinoGuire</Product>
+    <Copyright>Copyright © 2026 Aksel Alvarez</Copyright>
+
+    <!-- Pinned RhinoCommon floor version (Rhino 8.21) so Yak tags stay at 8.x floor rather than floating to 8.37 -->
+    <RhinoCommonVersion>8.21.25188.17001</RhinoCommonVersion>
+  </PropertyGroup>
+</Project>
