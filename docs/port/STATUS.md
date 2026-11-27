@@ -7,9 +7,9 @@ Tracking document for the RhinoGuire C# / WPF port. Updated at the start and end
 | WP | Description | Owner | State | Branch | Open questions / Notes |
 | --- | --- | --- | --- | --- | --- |
 | **WP-0** | Bootstrap and spikes | Antigravity, finished by Claude | Done | `feat/csharp-plugin` | Gate 0 passed. Results, decisions and dev loop in `SPIKE.md` |
-| **WP-1A** | Skin contract, shared controls, AAJ skin | Claude (started by a background agent) | In review: PR #9, Gate 1A passed | `wp-1a-skin` | Ready to merge. `SlopeInput` follows once WP-1B is merged |
-| **WP-1B** | Core logic and tests | Claude (started by a background agent) | In review: PR #8 | `wp-1b-core` | 900 tests; golden data regenerated from the Python tools |
-| **WP-1C** | Plugin shell, services, parity harness | — | Ready | — | Give panels a sensible size on first open (Gate 0 note, `SPIKE.md`) |
+| **WP-1A** | Skin contract, shared controls, AAJ skin | Claude | Done (PR #9 merged) | `wp-1a-skin` | Gate 1A passed. `SlopeInput` follow-up (needs WP-1B, now merged) |
+| **WP-1B** | Core logic and tests | Claude | Done (PR #8 merged) | `wp-1b-core` | 900 tests; golden data from the Python tools |
+| **WP-1C** | Plugin shell, services, parity harness | Claude (background agent) | In progress | `wp-1c-shell` | Includes panel size on first open and the skin/theme setting (RGOptions) |
 | **WP-1D** | White skin | — | Pending | — | Blocked by Gate 1A |
 | **WP-2A** | Baquiano (pilot) | — | Pending | — | Blocked by Gate 1A, 1B, 1C |
 | **WP-2B** | Terrain engine + Sebucan | — | Pending | — | Blocked by 1C |
