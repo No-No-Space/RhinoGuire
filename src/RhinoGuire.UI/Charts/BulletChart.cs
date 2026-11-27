@@ -31,7 +31,7 @@ public class BulletChart : ChartSurface
 {
     public const double RowHeight = 54;
     public const double LabelWidth = 128;
-    public const double ValueWidth = 118;
+    public const double ValueWidth = 156; // fits "[B] 12,345.6/12,345.6" in Fliege Mono 11px
     public const double BarHeight = 18;
 
     public static readonly DependencyProperty EntriesProperty = DependencyProperty.Register(

@@ -1,0 +1,242 @@
+<UserControl x:Class="RhinoGuire.UI.Gallery.GalleryPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RhinoGuire.UI.Controls"
+             Background="{DynamicResource SurfacePageBrush}">
+    <!-- Debug-only gallery (RGGallery): every control of the skin contract in every state.
+         Hover and pressed are forced with ctl:StatePreview, keyboard focus with ctl:FocusVisible,
+         so a static snapshot shows them all. -->
+    <UserControl.Resources>
+        <Style x:Key="Cell" TargetType="StackPanel">
+            <Setter Property="Margin" Value="0,0,20,16" />
+            <Setter Property="MinWidth" Value="120" />
+        </Style>
+        <Style x:Key="State" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style x:Key="Section" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{DynamicResource FontHeading}" />
+            <Setter Property="FontWeight" Value="{DynamicResource FontWeightHeading}" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSizeH3}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Margin" Value="0,24,0,12" />
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="24">
+            <TextBlock Text="RhinoGuire skin gallery" Style="{DynamicResource Tool.Text.Title}" />
+            <TextBlock x:Name="SkinLabel" Style="{DynamicResource Tool.Text.Secondary}" Margin="0,4,0,0" />
+            <Separator />
+
+            <!-- ── Type ───────────────────────────────────────────────── -->
+            <TextBlock Text="Type" Style="{StaticResource Section}" />
+            <StackPanel>
+                <TextBlock Text="Tool.Text.Title — Lindero" Style="{DynamicResource Tool.Text.Title}" />
+                <TextBlock Text="Tool.SectionHeader — Layer hierarchy" Style="{DynamicResource Tool.SectionHeader}" />
+                <TextBlock Text="Tool.Text.Body — Footprint area of every object, merged per level and category." Style="{DynamicResource Tool.Text.Body}" />
+                <TextBlock Text="Tool.Text.Secondary — Objects on _-prefixed layers are ignored with their sublayers." Style="{DynamicResource Tool.Text.Secondary}" Margin="0,4,0,0" />
+                <TextBlock Text="TOOL.TEXT.EYEBROW — PARENT LAYER" Style="{DynamicResource Tool.Text.Eyebrow}" Margin="0,8,0,0" />
+                <TextBlock Text="12,480.25 m²  ·  4 800 × 12 000 mm" Style="{DynamicResource Tool.Text.Figure}" Margin="0,4,0,0" />
+                <TextBlock Text="Tool.Text.Caption — Malmö · 2026-11-27" Style="{DynamicResource Tool.Text.Caption}" Margin="0,4,0,0" />
+            </StackPanel>
+
+            <!-- ── Buttons ────────────────────────────────────────────── -->
+            <TextBlock Text="Buttons" Style="{StaticResource Section}" />
+            <WrapPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="PRIMARY" Style="{StaticResource State}" /><Button Content="Calculate" Style="{DynamicResource Tool.Button.Primary}" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="HOVER" Style="{StaticResource State}" /><Button Content="Calculate" Style="{DynamicResource Tool.Button.Primary}" ctl:StatePreview.State="Hover" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="PRESSED" Style="{StaticResource State}" /><Button Content="Calculate" Style="{DynamicResource Tool.Button.Primary}" ctl:StatePreview.State="Pressed" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="FOCUS" Style="{StaticResource State}" /><Button Content="Calculate" Style="{DynamicResource Tool.Button.Primary}" ctl:FocusVisible.IsVisible="True" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="DISABLED" Style="{StaticResource State}" /><Button Content="Calculate" Style="{DynamicResource Tool.Button.Primary}" IsEnabled="False" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="SMALL" Style="{StaticResource State}" /><Button Content="Calculate" Style="{DynamicResource Tool.Button.Primary.Small}" HorizontalAlignment="Left" /></StackPanel>
+            </WrapPanel>
+            <WrapPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="SECONDARY" Style="{StaticResource State}" /><Button Content="Preview" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="HOVER" Style="{StaticResource State}" /><Button Content="Preview" ctl:StatePreview.State="Hover" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="PRESSED" Style="{StaticResource State}" /><Button Content="Preview" ctl:StatePreview.State="Pressed" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="FOCUS" Style="{StaticResource State}" /><Button Content="Preview" ctl:FocusVisible.IsVisible="True" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="DISABLED" Style="{StaticResource State}" /><Button Content="Preview" IsEnabled="False" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="SMALL" Style="{StaticResource State}" /><Button Content="Preview" Style="{DynamicResource Tool.Button.Secondary.Small}" HorizontalAlignment="Left" /></StackPanel>
+            </WrapPanel>
+            <WrapPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="TEXT" Style="{StaticResource State}" /><Button Content="Show all" Style="{DynamicResource Tool.Button.Text}" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="HOVER" Style="{StaticResource State}" /><Button Content="Show all" Style="{DynamicResource Tool.Button.Text}" ctl:StatePreview.State="Hover" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="DISABLED" Style="{StaticResource State}" /><Button Content="Show all" Style="{DynamicResource Tool.Button.Text}" IsEnabled="False" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}">
+                    <TextBlock Text="ICON · ICON SMALL" Style="{StaticResource State}" />
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{DynamicResource Tool.Button.Icon}" ToolTip="Refresh layers"><ctl:Icon Kind="RefreshCw" /></Button>
+                        <Button Style="{DynamicResource Tool.Button.Icon.Small}" Margin="8,0,0,0" ToolTip="Copy"><ctl:Icon Kind="Copy" /></Button>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Style="{StaticResource Cell}">
+                    <TextBlock Text="TOGGLE · ON" Style="{StaticResource State}" />
+                    <StackPanel Orientation="Horizontal">
+                        <ToggleButton Content="Netto" />
+                        <ToggleButton Content="Brutto" IsChecked="True" Margin="8,0,0,0" />
+                    </StackPanel>
+                </StackPanel>
+            </WrapPanel>
+
+            <!-- ── Fields ─────────────────────────────────────────────── -->
+            <TextBlock Text="Fields" Style="{StaticResource Section}" />
+            <WrapPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200"><TextBlock Text="REST" Style="{StaticResource State}" /><TextBox Text="Ebene_06" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200"><TextBlock Text="PLACEHOLDER" Style="{StaticResource State}" /><TextBox ctl:Field.Placeholder="Type to filter layers…" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200"><TextBlock Text="HOVER" Style="{StaticResource State}" /><TextBox Text="Ebene_06" ctl:StatePreview.State="Hover" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200"><TextBlock Text="FOCUS" Style="{StaticResource State}" /><TextBox Text="Ebene_06" ctl:FocusVisible.IsVisible="True" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200"><TextBlock Text="DISABLED" Style="{StaticResource State}" /><TextBox Text="Ebene_06" IsEnabled="False" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200"><TextBlock Text="NUMBER" Style="{StaticResource State}" /><TextBox Text="2.20" Style="{DynamicResource Tool.Field.Number}" /></StackPanel>
+            </WrapPanel>
+            <WrapPanel>
+                <ctl:Field Header="GROSS / NET FACTOR" Help="Measured areas are divided by this factor." Width="200" Margin="0,0,20,16">
+                    <TextBox Text="2.20" Style="{DynamicResource Tool.Field.Number}" />
+                </ctl:Field>
+                <ctl:Field Header="TOLERANCE (%)" State="Error" Message="Above the 50 % maximum." Width="200" Margin="0,0,20,16">
+                    <TextBox Text="75" Style="{DynamicResource Tool.Field.Number}" />
+                </ctl:Field>
+                <ctl:Field Header="SAMPLE SPACING (M)" State="Warning" Message="Fine spacing: slow on long roads." Width="200" Margin="0,0,20,16">
+                    <TextBox Text="0.25" Style="{DynamicResource Tool.Field.Number}" />
+                </ctl:Field>
+                <ctl:Field Header="CONFIG FILE" State="Success" Message="Loaded, version 2." Width="200" Margin="0,0,20,16">
+                    <TextBox Text="lindero.json" />
+                </ctl:Field>
+                <ctl:Field Header="BRUTTO GOAL (M²)" State="Changed" Message="Changed, not saved." Width="200" Margin="0,0,20,16">
+                    <TextBox Text="2640" Style="{DynamicResource Tool.Field.Number}" />
+                </ctl:Field>
+            </WrapPanel>
+
+            <!-- ── Select ─────────────────────────────────────────────── -->
+            <TextBlock Text="Select" Style="{StaticResource Section}" />
+            <WrapPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200">
+                    <TextBlock Text="VALUE" Style="{StaticResource State}" />
+                    <ComboBox SelectedIndex="0"><ComboBoxItem Content="Category (layer)" /><ComboBoxItem Content="Level (layer)" /></ComboBox>
+                </StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200">
+                    <TextBlock Text="PLACEHOLDER" Style="{StaticResource State}" />
+                    <ComboBox ctl:Field.Placeholder="Choose a parent layer"><ComboBoxItem Content="07-PROPOSAL-Phase_03" /></ComboBox>
+                </StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200">
+                    <TextBlock Text="HOVER" Style="{StaticResource State}" />
+                    <ComboBox SelectedIndex="0" ctl:StatePreview.State="Hover"><ComboBoxItem Content="Brutto (BGF)" /></ComboBox>
+                </StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200">
+                    <TextBlock Text="FOCUS" Style="{StaticResource State}" />
+                    <ComboBox SelectedIndex="0" ctl:FocusVisible.IsVisible="True"><ComboBoxItem Content="Brutto (BGF)" /></ComboBox>
+                </StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200">
+                    <TextBlock Text="DISABLED" Style="{StaticResource State}" />
+                    <ComboBox SelectedIndex="0" IsEnabled="False"><ComboBoxItem Content="Brutto (BGF)" /></ComboBox>
+                </StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="200">
+                    <TextBlock Text="KEY SEARCH (EDITABLE)" Style="{StaticResource State}" />
+                    <ctl:KeySearchComboBox x:Name="KeySearch" Text="Raum" />
+                </StackPanel>
+            </WrapPanel>
+
+            <!-- ── Choices ────────────────────────────────────────────── -->
+            <TextBlock Text="Checkbox, radio, switch" Style="{StaticResource Section}" />
+            <WrapPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="OFF" Style="{StaticResource State}" /><CheckBox Content="Z bands" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="ON" Style="{StaticResource State}" /><CheckBox Content="Z bands" IsChecked="True" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="MIXED" Style="{StaticResource State}" /><CheckBox Content="All levels" IsThreeState="True" IsChecked="{x:Null}" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="HOVER" Style="{StaticResource State}" /><CheckBox Content="Z bands" ctl:StatePreview.State="Hover" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="FOCUS" Style="{StaticResource State}" /><CheckBox Content="Z bands" IsChecked="True" ctl:FocusVisible.IsVisible="True" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="DISABLED" Style="{StaticResource State}" /><CheckBox Content="Z bands" IsChecked="True" IsEnabled="False" /></StackPanel>
+            </WrapPanel>
+            <WrapPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="OFF" Style="{StaticResource State}" /><RadioButton Content="Crown" GroupName="g1" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="ON" Style="{StaticResource State}" /><RadioButton Content="Crossfall" GroupName="g2" IsChecked="True" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="HOVER" Style="{StaticResource State}" /><RadioButton Content="Crown" GroupName="g3" ctl:StatePreview.State="Hover" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="FOCUS" Style="{StaticResource State}" /><RadioButton Content="Crossfall" GroupName="g4" IsChecked="True" ctl:FocusVisible.IsVisible="True" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="DISABLED" Style="{StaticResource State}" /><RadioButton Content="Crossfall" GroupName="g5" IsChecked="True" IsEnabled="False" /></StackPanel>
+            </WrapPanel>
+            <WrapPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="OFF" Style="{StaticResource State}" /><CheckBox Content="Live update" Style="{DynamicResource Tool.Switch}" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="ON" Style="{StaticResource State}" /><CheckBox Content="Live update" Style="{DynamicResource Tool.Switch}" IsChecked="True" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="HOVER" Style="{StaticResource State}" /><CheckBox Content="Live update" Style="{DynamicResource Tool.Switch}" ctl:StatePreview.State="Hover" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="FOCUS" Style="{StaticResource State}" /><CheckBox Content="Live update" Style="{DynamicResource Tool.Switch}" IsChecked="True" ctl:FocusVisible.IsVisible="True" /></StackPanel>
+                <StackPanel Style="{StaticResource Cell}"><TextBlock Text="DISABLED" Style="{StaticResource State}" /><CheckBox Content="Live update" Style="{DynamicResource Tool.Switch}" IsChecked="True" IsEnabled="False" /></StackPanel>
+            </WrapPanel>
+
+            <!-- ── Tabs, list, expander ───────────────────────────────── -->
+            <TextBlock Text="Tabs, list, expander" Style="{StaticResource Section}" />
+            <TabControl SelectedIndex="1" Height="120">
+                <TabItem Header="S1" />
+                <TabItem Header="S3 Hierarchy"><TextBlock Text="Tab content sits on the lighter surface, fused to the active tab." Style="{DynamicResource Tool.Text.Body}" /></TabItem>
+                <TabItem Header="R1" ctl:StatePreview.State="Hover" />
+                <TabItem Header="Settings" IsEnabled="False" />
+            </TabControl>
+            <WrapPanel Margin="0,16,0,0">
+                <StackPanel Style="{StaticResource Cell}" Width="260">
+                    <TextBlock Text="LIST · SELECTED · HOVER · SCROLL BAR" Style="{StaticResource State}" />
+                    <ListBox Height="150" SelectedIndex="1">
+                        <ListBoxItem Content="Diagnostik und Therapie" />
+                        <ListBoxItem Content="Pflege" />
+                        <ListBoxItem Content="Verkehrserschließung" ctl:StatePreview.State="Hover" />
+                        <ListBoxItem Content="Ver- und Entsorgung" />
+                        <ListBoxItem Content="Technische Gebäudeausrüstung" />
+                        <ListBoxItem Content="Freifläche" />
+                        <ListBoxItem Content="Forschung und Lehre" />
+                    </ListBox>
+                </StackPanel>
+                <StackPanel Style="{StaticResource Cell}" Width="260">
+                    <TextBlock Text="EXPANDER · CLOSED, OPEN" Style="{StaticResource State}" />
+                    <Expander Header="Advanced" />
+                    <Expander Header="Advanced" IsExpanded="True" Margin="0,8,0,0">
+                        <TextBlock Text="Fit tolerance, top rise and margin follow the sample spacing unless set here." Style="{DynamicResource Tool.Text.Secondary}" />
+                    </Expander>
+                </StackPanel>
+            </WrapPanel>
+
+            <!-- ── Table ──────────────────────────────────────────────── -->
+            <TextBlock Text="Table" Style="{StaticResource Section}" />
+            <TextBlock Text="HEADER · DATA (ALTERNATING) · SELECTED · CHANGED CELL · SUBTOTAL · TOTAL" Style="{StaticResource State}" />
+            <ctl:TreeDataGrid x:Name="Table" Height="372" />
+
+            <!-- ── Status and busy ────────────────────────────────────── -->
+            <TextBlock Text="Status" Style="{StaticResource Section}" />
+            <StackPanel>
+                <ctl:StatusLine Kind="None" Text="Ready. Pick a parent layer to start." Margin="0,0,0,8" />
+                <ctl:StatusLine Kind="Info" Text="12 levels found under 07-PROPOSAL-Phase_03." Margin="0,0,0,8" />
+                <ctl:StatusLine Kind="Success" Text="Calculated 12 levels and 9 categories in 3.2 s." Margin="0,0,0,8" />
+                <ctl:StatusLine Kind="Warning" Text="2 objects sit directly on a level layer (category —)." Margin="0,0,0,8" />
+                <ctl:StatusLine Kind="Error" Text="Union failed on Ebene_06; the plain sum is shown." Margin="0,0,0,8" />
+                <ctl:StatusLine Kind="Busy" Text="Merging footprints… 418 of 1 024 objects." Margin="0,0,0,8" />
+                <ctl:BusyBar IsBusy="True" Progress="0.4" Margin="0,4,0,0" />
+            </StackPanel>
+
+            <!-- ── Chart ──────────────────────────────────────────────── -->
+            <TextBlock Text="Bullet chart (R1 / R2)" Style="{StaticResource Section}" />
+            <ctl:BulletChart x:Name="Chart" Height="230" />
+
+            <!-- ── Card, rule, icons ──────────────────────────────────── -->
+            <TextBlock Text="Card, rule, icons" Style="{StaticResource Section}" />
+            <Border Style="{DynamicResource Tool.Card}">
+                <StackPanel>
+                    <TextBlock Text="TOOL.CARD" Style="{DynamicResource Tool.Text.Eyebrow}" />
+                    <TextBlock Text="A surface a step above the ground, with the 2px border." Style="{DynamicResource Tool.Text.Body}" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+            <Separator />
+            <ItemsControl x:Name="Icons">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Width="96" Margin="0,0,8,12">
+                            <ctl:Icon Kind="{Binding}" Size="24" HorizontalAlignment="Left" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="{Binding}" Style="{DynamicResource Tool.Text.Caption}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

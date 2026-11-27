@@ -5,40 +5,29 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              mc:Ignorable="d"
              d:DesignHeight="640" d:DesignWidth="340"
-             Background="{DynamicResource SurfacePage}">
+             Background="{DynamicResource SurfacePageBrush}">
     <!-- WP-0 spike panel: the manual checks for Gate 0. Automated checks live in RGSpikeTest. -->
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Margin="16">
-            <TextBlock x:Name="HeadingText"
-                       Text="RhinoGuire spike"
-                       Style="{DynamicResource SpikeTextBlock}"
-                       FontFamily="{DynamicResource FontHeading}"
-                       FontSize="{DynamicResource FontSizeHeading}"
-                       FontWeight="Bold" />
+        <StackPanel Margin="{DynamicResource PanelPadding}">
+            <TextBlock x:Name="HeadingText" Text="RhinoGuire spike" Style="{DynamicResource Tool.Text.Title}" />
             <TextBlock Text="Manual checks for Gate 0. The automated checks run with the RGSpikeTest command."
-                       Style="{DynamicResource SpikeTextBlock}"
-                       Foreground="{DynamicResource TextSecondary}"
-                       FontSize="{DynamicResource FontSizeSmall}"
-                       Margin="0,4,0,0" />
+                       Style="{DynamicResource Tool.Text.Secondary}" Margin="0,4,0,0" />
 
-            <TextBlock Text="1 · TYPING" Style="{DynamicResource SpikeLabel}" />
-            <TextBlock Style="{DynamicResource SpikeTextBlock}" FontSize="{DynamicResource FontSizeSmall}"
+            <TextBlock Text="1 · TYPING" Style="{DynamicResource Tool.Text.Eyebrow}" Margin="0,16,0,4" />
+            <TextBlock Style="{DynamicResource Tool.Text.Secondary}"
                        Text="Click in the box, type a few letters, then press Enter. The letters should appear here, not on Rhino's command line, and Enter should not run a command." />
-            <TextBox x:Name="SpikeTextBox" Style="{DynamicResource SpikeTextBox}" />
+            <TextBox x:Name="SpikeTextBox" Margin="0,8,0,0" />
 
-            <TextBlock Text="2 · PICK FROM A PANEL BUTTON" Style="{DynamicResource SpikeLabel}" />
-            <TextBlock Style="{DynamicResource SpikeTextBlock}" FontSize="{DynamicResource FontSizeSmall}"
+            <TextBlock Text="2 · PICK FROM A PANEL BUTTON" Style="{DynamicResource Tool.Text.Eyebrow}" Margin="0,16,0,4" />
+            <TextBlock Style="{DynamicResource Tool.Text.Secondary}"
                        Text="Click the button, then click any object in a viewport. Its id should appear below and Rhino should stay responsive." />
-            <Button x:Name="PickButton" Content="Pick object" Style="{DynamicResource SpikeButton}"
-                    HorizontalAlignment="Left" Click="OnPickObjectClicked" />
-            <TextBlock x:Name="PickStatusText" Text="No object picked." Style="{DynamicResource SpikeTextBlock}"
-                       FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeSmall}" />
+            <Button x:Name="PickButton" Content="Pick object" Style="{DynamicResource Tool.Button.Primary}"
+                    HorizontalAlignment="Left" Margin="0,8,0,0" Click="OnPickObjectClicked" />
+            <TextBlock x:Name="PickStatusText" Text="No object picked." Style="{DynamicResource Tool.Text.Caption}" Margin="0,6,0,0" />
 
-            <TextBlock Text="3 · THEME" Style="{DynamicResource SpikeLabel}" />
-            <Button x:Name="ThemeButton" Content="Toggle dark / light" Style="{DynamicResource SpikeButton}"
-                    HorizontalAlignment="Left" Click="OnToggleThemeClicked" />
-            <TextBlock x:Name="ThemeStatusText" Text="Theme: light" Style="{DynamicResource SpikeTextBlock}"
-                       FontSize="{DynamicResource FontSizeSmall}" />
+            <TextBlock Text="3 · THEME" Style="{DynamicResource Tool.Text.Eyebrow}" Margin="0,16,0,4" />
+            <Button x:Name="ThemeButton" Content="Toggle dark / light" HorizontalAlignment="Left" Click="OnToggleThemeClicked" />
+            <TextBlock x:Name="ThemeStatusText" Text="Theme: light" Style="{DynamicResource Tool.Text.Caption}" Margin="0,6,0,0" />
         </StackPanel>
     </ScrollViewer>
 </UserControl>

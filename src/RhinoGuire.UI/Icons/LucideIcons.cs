@@ -11,18 +11,21 @@ public static partial class LucideIcons
     /// <summary>Lucide's design grid: every icon is drawn in a 24 x 24 box.</summary>
     public const double GridSize = 24.0;
 
-    private static readonly Geometry?[] Cache = new Geometry?[PathData.Length];
+    // Created on first use: PathData lives in the other part of this partial class, and C# does not
+    // order static field initializers across partial files, so sizing the cache here could see it null.
+    private static Geometry?[]? _cache;
 
     /// <summary>Frozen geometry for <paramref name="kind"/> on the 24 x 24 grid (empty for <see cref="IconKind.None"/>).</summary>
     public static Geometry Get(IconKind kind)
     {
         int i = (int)kind;
         if (i <= 0 || i >= PathData.Length) return Geometry.Empty;
-        var cached = Cache[i];
+        var cache = _cache ??= new Geometry?[PathData.Length];
+        var cached = cache[i];
         if (cached != null) return cached;
         var geometry = Geometry.Parse(PathData[i]);
         geometry.Freeze();
-        Cache[i] = geometry;
+        cache[i] = geometry;
         return geometry;
     }
 

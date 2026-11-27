@@ -394,6 +394,12 @@ public class TreeDataGridCell : ContentControl
         FocusableProperty.OverrideMetadata(typeof(TreeDataGridCell), new FrameworkPropertyMetadata(false));
     }
 
+    public override void OnApplyTemplate()
+    {
+        base.OnApplyTemplate();
+        InheritedTextRefresh.Refresh(this);
+    }
+
     /// <summary>Figures: right-aligned, mono, tabular.</summary>
     public bool IsNumeric { get => (bool)GetValue(IsNumericProperty); set => SetValue(IsNumericProperty, value); }
 
@@ -418,6 +424,36 @@ public class TreeDataGridHeaderCell : ContentControl
         FocusableProperty.OverrideMetadata(typeof(TreeDataGridHeaderCell), new FrameworkPropertyMetadata(false));
     }
 
+    public override void OnApplyTemplate()
+    {
+        base.OnApplyTemplate();
+        InheritedTextRefresh.Refresh(this);
+    }
+
     /// <summary>Header of a numeric column: right-aligned like its figures.</summary>
     public bool IsNumeric { get => (bool)GetValue(IsNumericProperty); set => SetValue(IsNumericProperty, value); }
+}
+
+/// <summary>
+/// Works around a WPF limitation for the grid's code-created cells: when an element is created and added
+/// while its container applies a template or prepares an item container, WPF evaluates its inherited text
+/// properties before the element's style has hooked up its <c>DynamicResource</c> values, and does not
+/// refresh them afterwards (the header showed Carbón text on a Carbón fill). Re-evaluating them once the
+/// element has applied its template lets the skin's style win, as it should.
+/// </summary>
+internal static class InheritedTextRefresh
+{
+    private static readonly DependencyProperty[] Properties =
+    {
+        Control.ForegroundProperty, Control.FontFamilyProperty, Control.FontSizeProperty,
+        Control.FontWeightProperty, Control.FontStyleProperty,
+    };
+
+    /// <summary>Re-evaluates the inherited text properties. Call from <c>OnApplyTemplate</c>, which runs
+    /// during layout whether the grid is docked or rendered off-screen (Loaded fires only in a window).</summary>
+    public static void Refresh(FrameworkElement element)
+    {
+        foreach (var p in Properties)
+            element.InvalidateProperty(p);
+    }
 }
