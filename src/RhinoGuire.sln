@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoGuire.UI", "RhinoGuire
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoGuire.Plugin", "RhinoGuire.Plugin\RhinoGuire.Plugin.csproj", "{FFA645D5-DD86-4069-A629-42861ED03584}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RhinoGuire.UI.Tests", "RhinoGuire.UI.Tests\RhinoGuire.UI.Tests.csproj", "{84F3CCFC-8518-4776-9847-2D814D56CB53}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -42,5 +44,9 @@ Global
 		{FFA645D5-DD86-4069-A629-42861ED03584}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FFA645D5-DD86-4069-A629-42861ED03584}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FFA645D5-DD86-4069-A629-42861ED03584}.Release|Any CPU.Build.0 = Release|Any CPU
+		{84F3CCFC-8518-4776-9847-2D814D56CB53}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{84F3CCFC-8518-4776-9847-2D814D56CB53}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{84F3CCFC-8518-4776-9847-2D814D56CB53}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{84F3CCFC-8518-4776-9847-2D814D56CB53}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

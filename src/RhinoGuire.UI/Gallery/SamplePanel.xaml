@@ -1,0 +1,57 @@
+<UserControl x:Class="RhinoGuire.UI.Gallery.SamplePanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:RhinoGuire.UI.Controls"
+             Background="{DynamicResource SurfacePageBrush}">
+    <!-- Debug-only: a realistic docked tool panel (~360px wide) for judging density at Gate 1A.
+         It mirrors what Lindero's S3 tab will hold; it is not a real tool. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="{DynamicResource PanelPadding}">
+            <TextBlock Text="S3 · LAYER HIERARCHY" Style="{DynamicResource Tool.Text.Eyebrow}" />
+            <TextBlock Text="Lindero" Style="{DynamicResource Tool.Text.Title}" Margin="0,2,0,12" />
+
+            <ctl:Field Header="PARENT LAYER">
+                <ComboBox SelectedIndex="0">
+                    <ComboBoxItem Content="07-PROPOSAL-Phase_03" />
+                    <ComboBoxItem Content="06-PROPOSAL-Phase_02" />
+                </ComboBox>
+            </ctl:Field>
+            <ctl:Field Header="OBJECT LABEL KEY" Help="Optional; falls back to the object name.">
+                <ctl:KeySearchComboBox x:Name="KeySearch" ctl:Field.Placeholder="User text key" />
+            </ctl:Field>
+
+            <CheckBox Content="Merge overlaps per level" IsChecked="True" />
+            <CheckBox Content="Split floors by Z height" Margin="0,4,0,0" />
+
+            <Expander Header="Advanced" IsExpanded="True" Margin="0,12,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ctl:Field Header="Z TOLERANCE (M)" Margin="0">
+                        <TextBox Text="0.50" Style="{DynamicResource Tool.Field.Number}" />
+                    </ctl:Field>
+                    <ctl:Field Grid.Column="2" Header="GROSS / NET" State="Changed" Message="Not saved." Margin="0">
+                        <TextBox Text="2.30" Style="{DynamicResource Tool.Field.Number}" />
+                    </ctl:Field>
+                </Grid>
+            </Expander>
+
+            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                <Button Content="Calculate" Style="{DynamicResource Tool.Button.Primary}" />
+                <Button Content="Preview structure" Margin="12,0,0,0" />
+            </StackPanel>
+
+            <ctl:StatusLine Kind="Success" Text="12 levels, 9 categories in 3.2 s." Margin="0,12,0,12" />
+
+            <ctl:TreeDataGrid x:Name="Table" Height="300" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <Button Content="Export Excel" Style="{DynamicResource Tool.Button.Text}" />
+                <Button Content="Copy window" Style="{DynamicResource Tool.Button.Text}" Margin="20,0,0,0" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

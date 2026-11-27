@@ -1,0 +1,36 @@
+<!-- GENERATED FILE, DO NOT EDIT.
+     Built by tools/build_aaj_skin.py from Skins/AAJ/tokens.json and Skins/AAJ/skin-map.json.
+     Change the map (or the vendored tokens) and run the script again.
+     The keys are specified in docs/port/SKIN_CONTRACT.md. -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!-- Variant 'Compact': merged after Tokens.Shared.xaml. Denser variant for docked panels: 32px controls. Gate 1A decides between this and the AAJ default (40px). -->
+
+    <!-- Overrides for Compact -->
+    <!-- ControlHeight: literal; bundle.css .aaj-btn / .aaj-field__input min-height -->
+    <sys:Double x:Key="ControlHeight">32</sys:Double>
+    <!-- ControlHeightSmall: literal; AAJ has no small control; proposed for secondary actions in dense panels.; RhinoGuire value (not in AAJ), approved at Gate 1A -->
+    <sys:Double x:Key="ControlHeightSmall">26</sys:Double>
+    <!-- TableRowHeight: literal; bundle.css td: 9px padding + 12px x 1.4 line + 1px rule, rounded -->
+    <sys:Double x:Key="TableRowHeight">28</sys:Double>
+    <!-- TableHeaderHeight: literal; bundle.css th: 10px padding + 11px x 1.3 line -->
+    <sys:Double x:Key="TableHeaderHeight">28</sys:Double>
+    <!-- AajButtonPadding: literal -->
+    <Thickness x:Key="AajButtonPadding">14,5</Thickness>
+    <!-- AajButtonPaddingSmall: literal; RhinoGuire value (not in AAJ), approved at Gate 1A -->
+    <Thickness x:Key="AajButtonPaddingSmall">10,3</Thickness>
+    <!-- AajFieldPadding: literal -->
+    <Thickness x:Key="AajFieldPadding">10,5</Thickness>
+    <!-- AajTabPadding: literal -->
+    <Thickness x:Key="AajTabPadding">12,6</Thickness>
+    <!-- AajTabHeight: literal -->
+    <sys:Double x:Key="AajTabHeight">32</sys:Double>
+    <!-- AajTabPanelPadding: space-6 -->
+    <Thickness x:Key="AajTabPanelPadding">16</Thickness>
+    <!-- AajListItemPadding: literal -->
+    <Thickness x:Key="AajListItemPadding">10,5</Thickness>
+    <!-- AajCellPadding: literal -->
+    <Thickness x:Key="AajCellPadding">8,0</Thickness>
+</ResourceDictionary>

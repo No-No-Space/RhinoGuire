@@ -1,19 +1,134 @@
+<!-- GENERATED FILE, DO NOT EDIT.
+     Built by tools/build_aaj_skin.py from Skins/AAJ/tokens.json and Skins/AAJ/skin-map.json.
+     Change the map (or the vendored tokens) and run the script again.
+     The keys are specified in docs/port/SKIN_CONTRACT.md. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
-    <!-- WP-0 spike subset. WP-1A replaces this file with the output of tools/build_aaj_skin.py. -->
 
-    <!-- Fonts embedded in RhinoGuire.UI (Skins/AAJ/Fonts, OFL). The name after # is the font's internal family name. -->
+    <!-- Contract metrics (docs/port/SKIN_CONTRACT.md) -->
+    <!-- FontHeading: type.families.heading -->
     <FontFamily x:Key="FontHeading">pack://application:,,,/RhinoGuire.UI;component/Skins/AAJ/Fonts/#Gully</FontFamily>
+    <!-- FontBody: type.families.body -->
     <FontFamily x:Key="FontBody">pack://application:,,,/RhinoGuire.UI;component/Skins/AAJ/Fonts/#Moderustic</FontFamily>
+    <!-- FontMono: type.families.mono -->
     <FontFamily x:Key="FontMono">pack://application:,,,/RhinoGuire.UI;component/Skins/AAJ/Fonts/#Fliege Mono</FontFamily>
-
-    <!-- Metrics -->
+    <!-- FontSizeH1: text-h1 -->
+    <sys:Double x:Key="FontSizeH1">36</sys:Double>
+    <!-- FontSizeH2: text-h2 -->
+    <sys:Double x:Key="FontSizeH2">24</sys:Double>
+    <!-- FontSizeH3: text-h3 -->
+    <sys:Double x:Key="FontSizeH3">18</sys:Double>
+    <!-- FontSizeBody: text-body -->
     <sys:Double x:Key="FontSizeBody">14.5</sys:Double>
-    <sys:Double x:Key="FontSizeSmall">13</sys:Double>
-    <sys:Double x:Key="FontSizeLabel">11</sys:Double>
-    <sys:Double x:Key="FontSizeHeading">18</sys:Double>
+    <!-- FontSizeBodySm: text-small -->
+    <sys:Double x:Key="FontSizeBodySm">13</sys:Double>
+    <!-- FontSizeMono: text-mono -->
+    <sys:Double x:Key="FontSizeMono">14</sys:Double>
+    <!-- FontSizeTable: literal; bundle.css .aaj-table -->
+    <sys:Double x:Key="FontSizeTable">12</sys:Double>
+    <!-- FontSizeEyebrow: literal; bundle.css .aaj-field__label -->
+    <sys:Double x:Key="FontSizeEyebrow">11</sys:Double>
+    <!-- FontSizeCaption: literal; bundle.css .aaj-table__caption -->
+    <sys:Double x:Key="FontSizeCaption">11</sys:Double>
+    <!-- FontWeightHeading: literal -->
+    <FontWeight x:Key="FontWeightHeading">Bold</FontWeight>
+    <!-- FontWeightBody: literal -->
+    <FontWeight x:Key="FontWeightBody">Normal</FontWeight>
+    <!-- FontWeightStrong: literal -->
+    <FontWeight x:Key="FontWeightStrong">Bold</FontWeight>
+    <!-- FontWeightFigure: literal; Fliege Mono 300 for figures -->
+    <FontWeight x:Key="FontWeightFigure">Light</FontWeight>
+    <!-- FontWeightEyebrow: literal; Fliege Mono 400 for labels at 11px -->
+    <FontWeight x:Key="FontWeightEyebrow">Normal</FontWeight>
+    <!-- ControlBorderWidth: border-default -->
+    <sys:Double x:Key="ControlBorderWidth">2</sys:Double>
+    <!-- ControlBorderWidthThickness: border-default -->
+    <Thickness x:Key="ControlBorderWidthThickness">2</Thickness>
+    <!-- LineThickness: border-default -->
+    <sys:Double x:Key="LineThickness">2</sys:Double>
+    <!-- LineThicknessThickness: border-default -->
+    <Thickness x:Key="LineThicknessThickness">2</Thickness>
+    <!-- LineThicknessThin: border-hairline -->
+    <sys:Double x:Key="LineThicknessThin">1</sys:Double>
+    <!-- LineThicknessThinThickness: border-hairline -->
+    <Thickness x:Key="LineThicknessThinThickness">1</Thickness>
+    <!-- FocusRingWidth: literal -->
+    <sys:Double x:Key="FocusRingWidth">2</sys:Double>
+    <!-- FocusRingWidthThickness: literal -->
+    <Thickness x:Key="FocusRingWidthThickness">2</Thickness>
+    <!-- FocusRingOffset: literal -->
+    <sys:Double x:Key="FocusRingOffset">2</sys:Double>
+    <!-- FocusRingOffsetThickness: literal -->
+    <Thickness x:Key="FocusRingOffsetThickness">2</Thickness>
+    <!-- Radius: radius-none -->
+    <CornerRadius x:Key="Radius">0</CornerRadius>
+    <!-- ControlHeight: literal; bundle.css .aaj-btn / .aaj-field__input min-height -->
     <sys:Double x:Key="ControlHeight">40</sys:Double>
-    <Thickness x:Key="ControlBorderThickness">2</Thickness>
-    <CornerRadius x:Key="ControlCornerRadius">0</CornerRadius>
+    <!-- ControlHeightSmall: literal; AAJ has no small control; proposed for secondary actions in dense panels.; RhinoGuire value (not in AAJ), approved at Gate 1A -->
+    <sys:Double x:Key="ControlHeightSmall">32</sys:Double>
+    <!-- TableRowHeight: literal; bundle.css td: 9px padding + 12px x 1.4 line + 1px rule, rounded -->
+    <sys:Double x:Key="TableRowHeight">36</sys:Double>
+    <!-- TableHeaderHeight: literal; bundle.css th: 10px padding + 11px x 1.3 line -->
+    <sys:Double x:Key="TableHeaderHeight">34</sys:Double>
+    <!-- TableIndent: literal; Indent per tree level in TreeDataGrid.; RhinoGuire value (not in AAJ), approved at Gate 1A -->
+    <sys:Double x:Key="TableIndent">16</sys:Double>
+    <!-- IconSize: literal -->
+    <sys:Double x:Key="IconSize">16</sys:Double>
+    <!-- IconSizeLarge: literal; AAJ iconography: 24px default -->
+    <sys:Double x:Key="IconSizeLarge">24</sys:Double>
+    <!-- IconStrokeWidth: literal; AAJ iconography: Lucide at 1.5px -->
+    <sys:Double x:Key="IconStrokeWidth">1.5</sys:Double>
+    <!-- Space1: space-1 -->
+    <sys:Double x:Key="Space1">4</sys:Double>
+    <!-- Space2: space-2 -->
+    <sys:Double x:Key="Space2">8</sys:Double>
+    <!-- Space3: space-3 -->
+    <sys:Double x:Key="Space3">12</sys:Double>
+    <!-- Space4: space-4 -->
+    <sys:Double x:Key="Space4">16</sys:Double>
+    <!-- Space6: space-6 -->
+    <sys:Double x:Key="Space6">24</sys:Double>
+    <!-- Space8: space-8 -->
+    <sys:Double x:Key="Space8">32</sys:Double>
+    <!-- PanelPadding: space-4; space-4: AAJ card padding on narrow screens; a docked panel is 320-400px wide -->
+    <Thickness x:Key="PanelPadding">16</Thickness>
+
+    <!-- AAJ-only metrics, used by Skins/AAJ/Controls.xaml only -->
+    <!-- AajFontSizeButton: literal -->
+    <sys:Double x:Key="AajFontSizeButton">14</sys:Double>
+    <!-- AajFontSizeButtonSmall: literal; RhinoGuire value (not in AAJ), approved at Gate 1A -->
+    <sys:Double x:Key="AajFontSizeButtonSmall">13</sys:Double>
+    <!-- AajFontSizeTab: literal -->
+    <sys:Double x:Key="AajFontSizeTab">13</sys:Double>
+    <!-- AajFontSizeField: literal -->
+    <sys:Double x:Key="AajFontSizeField">15</sys:Double>
+    <!-- AajFontWeightTableHeader: literal; bundle.css asks for 600; Fliege Mono ships 500 and 700, and 600 resolves to 700 as in a browser -->
+    <FontWeight x:Key="AajFontWeightTableHeader">Bold</FontWeight>
+    <!-- AajButtonPadding: literal -->
+    <Thickness x:Key="AajButtonPadding">18,9</Thickness>
+    <!-- AajButtonPaddingSmall: literal; RhinoGuire value (not in AAJ), approved at Gate 1A -->
+    <Thickness x:Key="AajButtonPaddingSmall">12,5</Thickness>
+    <!-- AajFieldPadding: literal -->
+    <Thickness x:Key="AajFieldPadding">12,9</Thickness>
+    <!-- AajTabPadding: literal -->
+    <Thickness x:Key="AajTabPadding">16,10</Thickness>
+    <!-- AajTabHeight: literal -->
+    <sys:Double x:Key="AajTabHeight">38</sys:Double>
+    <!-- AajTabPanelPadding: space-6 -->
+    <Thickness x:Key="AajTabPanelPadding">24</Thickness>
+    <!-- AajListItemPadding: literal -->
+    <Thickness x:Key="AajListItemPadding">12,9</Thickness>
+    <!-- AajCellPadding: literal -->
+    <Thickness x:Key="AajCellPadding">12,0</Thickness>
+    <!-- AajChoiceSize: literal -->
+    <sys:Double x:Key="AajChoiceSize">20</sys:Double>
+    <!-- AajButtonShadowVisibility: literal -->
+    <Visibility x:Key="AajButtonShadowVisibility">Visible</Visibility>
+    <!-- AajButtonFaceMargin: literal -->
+    <Thickness x:Key="AajButtonFaceMargin">0,0,4,4</Thickness>
+    <!-- AajButtonFacePressedMargin: literal -->
+    <Thickness x:Key="AajButtonFacePressedMargin">4,4,0,0</Thickness>
+    <!-- AajShadowMargin: literal -->
+    <Thickness x:Key="AajShadowMargin">4,4,0,0</Thickness>
 </ResourceDictionary>

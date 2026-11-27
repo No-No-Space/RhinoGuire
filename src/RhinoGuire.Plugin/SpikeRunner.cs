@@ -104,11 +104,11 @@ internal static class SpikeRunner
     private static (bool, string) CheckEmbeddedSkin(SpikePanel panel)
     {
         panel.SetTheme(false);
-        var page = panel.TryFindResource("SurfacePage") as SolidColorBrush;
-        bool style = panel.TryFindResource("SpikeButton") is Style;
+        var page = panel.TryFindResource("SurfacePageBrush") as SolidColorBrush;
+        bool style = panel.TryFindResource("Tool.Button.Primary") is Style;
         var bg = (panel.Background as SolidColorBrush)?.Color;
         bool ok = page?.Color == LightPage && style && bg == LightPage;
-        return (ok, $"SurfacePage={page?.Color}; SpikeButton style={(style ? "found" : "missing")}; panel background={bg}; packSchemeKnown={UriParser.IsKnownScheme("pack")}");
+        return (ok, $"SurfacePageBrush={page?.Color}; Tool.Button.Primary style={(style ? "found" : "missing")}; panel background={bg}; packSchemeKnown={UriParser.IsKnownScheme("pack")}");
     }
 
     private static (bool, string) CheckEmbeddedFonts(SpikePanel panel)
@@ -173,10 +173,10 @@ internal static class SpikeRunner
         File.WriteAllText(Path.Combine(folder, "Tokens.Light.xaml"), $"""
             <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                                xmlns:ui="clr-namespace:RhinoGuire.UI;assembly=RhinoGuire.UI">
-                <SolidColorBrush x:Key="SurfacePage" Color="{LoosePage}" />
+                                xmlns:ctl="clr-namespace:RhinoGuire.UI.Controls;assembly=RhinoGuire.UI">
+                <SolidColorBrush x:Key="SurfacePageBrush" Color="{LoosePage}" />
                 <FontFamily x:Key="FontLooseProbe">./Fonts/#Fliege Mono</FontFamily>
-                <Style x:Key="LooseProbeStyle" TargetType="{"{"}x:Type ui:SpikeProbe{"}"}">
+                <Style x:Key="LooseProbeStyle" TargetType="{"{"}x:Type ctl:StatusLine{"}"}">
                     <Setter Property="Width" Value="12" />
                 </Style>
             </ResourceDictionary>
@@ -187,7 +187,7 @@ internal static class SpikeRunner
             panel.SetTheme(false, folder);
             var bg = (panel.Background as SolidColorBrush)?.Color;
             bool overridden = bg == LoosePage;
-            bool embeddedStillThere = panel.TryFindResource("SpikeButton") is Style;
+            bool embeddedStillThere = panel.TryFindResource("Tool.Button.Primary") is Style;
 
             string fontDetail = "FontLooseProbe missing";
             bool fontFromFolder = false;
@@ -200,12 +200,12 @@ internal static class SpikeRunner
             }
 
             var probeStyle = panel.TryFindResource("LooseProbeStyle") as Style;
-            bool sameType = probeStyle?.TargetType == typeof(SpikeProbe);
+            bool sameType = probeStyle?.TargetType == typeof(RhinoGuire.UI.Controls.StatusLine);
 
             bool ok = overridden && embeddedStillThere && fontFromFolder && sameType;
-            return (ok, $"override SurfacePage: {bg} ({(overridden ? "ok" : "FAIL")}); embedded SpikeButton still resolves: {embeddedStillThere}; " +
+            return (ok, $"override SurfacePage: {bg} ({(overridden ? "ok" : "FAIL")}); embedded Tool.Button.Primary still resolves: {embeddedStillThere}; " +
                         $"{fontDetail} (from skin folder: {fontFromFolder}); " +
-                        $"style TargetType is RhinoGuire.UI.SpikeProbe from the loaded assembly: {sameType}");
+                        $"style TargetType is RhinoGuire.UI.Controls.StatusLine from the loaded assembly: {sameType}");
         }
         finally
         {
@@ -240,7 +240,7 @@ internal static class SpikeRunner
             .Select(a => $"{a.GetName().Version} @ {a.Location} [{AssemblyLoadContext.GetLoadContext(a)?.Name}]")
             .ToList();
         panel.SetTheme(false);
-        bool packStillOk = panel.TryFindResource("SpikeButton") is Style
+        bool packStillOk = panel.TryFindResource("Tool.Button.Primary") is Style
                            && (panel.Background as SolidColorBrush)?.Color == LightPage;
 
         string Ver(string name) => AppDomain.CurrentDomain.GetAssemblies()
