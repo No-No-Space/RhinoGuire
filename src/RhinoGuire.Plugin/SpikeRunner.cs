@@ -173,10 +173,10 @@ internal static class SpikeRunner
         File.WriteAllText(Path.Combine(folder, "Tokens.Light.xaml"), $"""
             <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                                xmlns:ui="clr-namespace:RhinoGuire.UI;assembly=RhinoGuire.UI">
+                                xmlns:ctl="clr-namespace:RhinoGuire.UI.Controls;assembly=RhinoGuire.UI">
                 <SolidColorBrush x:Key="SurfacePage" Color="{LoosePage}" />
                 <FontFamily x:Key="FontLooseProbe">./Fonts/#Fliege Mono</FontFamily>
-                <Style x:Key="LooseProbeStyle" TargetType="{"{"}x:Type ui:SpikeProbe{"}"}">
+                <Style x:Key="LooseProbeStyle" TargetType="{"{"}x:Type ctl:StatusLine{"}"}">
                     <Setter Property="Width" Value="12" />
                 </Style>
             </ResourceDictionary>
@@ -200,12 +200,12 @@ internal static class SpikeRunner
             }
 
             var probeStyle = panel.TryFindResource("LooseProbeStyle") as Style;
-            bool sameType = probeStyle?.TargetType == typeof(SpikeProbe);
+            bool sameType = probeStyle?.TargetType == typeof(RhinoGuire.UI.Controls.StatusLine);
 
             bool ok = overridden && embeddedStillThere && fontFromFolder && sameType;
             return (ok, $"override SurfacePage: {bg} ({(overridden ? "ok" : "FAIL")}); embedded SpikeButton still resolves: {embeddedStillThere}; " +
                         $"{fontDetail} (from skin folder: {fontFromFolder}); " +
-                        $"style TargetType is RhinoGuire.UI.SpikeProbe from the loaded assembly: {sameType}");
+                        $"style TargetType is RhinoGuire.UI.Controls.StatusLine from the loaded assembly: {sameType}");
         }
         finally
         {

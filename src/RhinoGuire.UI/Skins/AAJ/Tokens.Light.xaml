@@ -1,29 +1,248 @@
+<!-- GENERATED FILE, DO NOT EDIT.
+     Built by tools/build_aaj_skin.py from Skins/AAJ/tokens.json and Skins/AAJ/skin-map.json.
+     Change the map (or the vendored tokens) and run the script again.
+     The keys are specified in docs/port/SKIN_CONTRACT.md. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- WP-0 spike subset, values from _Skills/AAJ Design System/tokens.json.
-         WP-1A replaces this file with the output of tools/build_aaj_skin.py. -->
 
-    <Color x:Key="ColorSurfacePage">#F2EDE6</Color>      <!-- bg-page (Hueso) -->
-    <SolidColorBrush x:Key="SurfacePage" Color="{StaticResource ColorSurfacePage}" />
+    <!-- Contract colours (docs/port/SKIN_CONTRACT.md) -->
+    <!-- SurfacePage: bg-page -->
+    <Color x:Key="SurfacePageColor">#F2EDE6</Color>
+    <SolidColorBrush x:Key="SurfacePageBrush" Color="#F2EDE6" />
+    <!-- SurfaceSubtle: bg-surface -->
+    <Color x:Key="SurfaceSubtleColor">#FBF9F5</Color>
+    <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#FBF9F5" />
+    <!-- TextPrimary: text-primary -->
+    <Color x:Key="TextPrimaryColor">#2A2725</Color>
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#2A2725" />
+    <!-- TextSecondary: text-secondary -->
+    <Color x:Key="TextSecondaryColor">#8A8580</Color>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#8A8580" />
+    <!-- TextDisabled: state-disabled-text -->
+    <Color x:Key="TextDisabledColor">#8A8580</Color>
+    <SolidColorBrush x:Key="TextDisabledBrush" Color="#8A8580" />
+    <!-- TextInverse: color-hueso -->
+    <Color x:Key="TextInverseColor">#F2EDE6</Color>
+    <SolidColorBrush x:Key="TextInverseBrush" Color="#F2EDE6" />
+    <!-- BorderSubtle: table-rule -->
+    <Color x:Key="BorderSubtleColor">#D5D1CB</Color>
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#D5D1CB" />
+    <!-- BorderControl: color-border -->
+    <Color x:Key="BorderControlColor">#2A2725</Color>
+    <SolidColorBrush x:Key="BorderControlBrush" Color="#2A2725" />
+    <!-- BorderStrong: color-carbon -->
+    <Color x:Key="BorderStrongColor">#2A2725</Color>
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="#2A2725" />
+    <!-- FocusRing: focus-ring -->
+    <Color x:Key="FocusRingColor">#2A8B9C</Color>
+    <SolidColorBrush x:Key="FocusRingBrush" Color="#2A8B9C" />
+    <!-- UiDefault: color-carbon -->
+    <Color x:Key="UiDefaultColor">#2A2725</Color>
+    <SolidColorBrush x:Key="UiDefaultBrush" Color="#2A2725" />
+    <!-- UiHover: state-primary-hover -->
+    <Color x:Key="UiHoverColor">#3F3B38</Color>
+    <SolidColorBrush x:Key="UiHoverBrush" Color="#3F3B38" />
+    <!-- UiPressed: state-primary-pressed -->
+    <Color x:Key="UiPressedColor">#57534F</Color>
+    <SolidColorBrush x:Key="UiPressedBrush" Color="#57534F" />
+    <!-- UiSubtle: state-secondary-hover -->
+    <Color x:Key="UiSubtleColor">#E8E1D5</Color>
+    <SolidColorBrush x:Key="UiSubtleBrush" Color="#E8E1D5" />
+    <!-- UiOn: color-hueso -->
+    <Color x:Key="UiOnColor">#F2EDE6</Color>
+    <SolidColorBrush x:Key="UiOnBrush" Color="#F2EDE6" />
+    <!-- UiOnPressed: color-hueso -->
+    <Color x:Key="UiOnPressedColor">#F2EDE6</Color>
+    <SolidColorBrush x:Key="UiOnPressedBrush" Color="#F2EDE6" />
+    <!-- ActivityDefault: color-mar-caribe -->
+    <Color x:Key="ActivityDefaultColor">#2A8B9C</Color>
+    <SolidColorBrush x:Key="ActivityDefaultBrush" Color="#2A8B9C" />
+    <!-- ActivitySubtle: seq-mar-1, PROPOSED (Gate 1A) -->
+    <Color x:Key="ActivitySubtleColor">#C3DDE2</Color>
+    <SolidColorBrush x:Key="ActivitySubtleBrush" Color="#C3DDE2" />
+    <!-- ActivityStrong: color-mar-caribe-deep -->
+    <Color x:Key="ActivityStrongColor">#1F6E7B</Color>
+    <SolidColorBrush x:Key="ActivityStrongBrush" Color="#1F6E7B" />
+    <!-- SelectionDefault: row-selected -->
+    <Color x:Key="SelectionDefaultColor">#1F6E7B</Color>
+    <SolidColorBrush x:Key="SelectionDefaultBrush" Color="#1F6E7B" />
+    <!-- SelectionSubtle: seq-mar-1, PROPOSED (Gate 1A) -->
+    <Color x:Key="SelectionSubtleColor">#C3DDE2</Color>
+    <SolidColorBrush x:Key="SelectionSubtleBrush" Color="#C3DDE2" />
+    <!-- SelectionStrong: color-mar-caribe-deep -->
+    <Color x:Key="SelectionStrongColor">#1F6E7B</Color>
+    <SolidColorBrush x:Key="SelectionStrongBrush" Color="#1F6E7B" />
+    <!-- SelectionOn: row-selected-text -->
+    <Color x:Key="SelectionOnColor">#F2EDE6</Color>
+    <SolidColorBrush x:Key="SelectionOnBrush" Color="#F2EDE6" />
+    <!-- StatusSuccessSubtle: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="StatusSuccessSubtleColor">#E8EFE6</Color>
+    <SolidColorBrush x:Key="StatusSuccessSubtleBrush" Color="#E8EFE6" />
+    <!-- StatusSuccessStrong: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="StatusSuccessStrongColor">#2F6E4A</Color>
+    <SolidColorBrush x:Key="StatusSuccessStrongBrush" Color="#2F6E4A" />
+    <!-- StatusWarningSubtle: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="StatusWarningSubtleColor">#F8EFDF</Color>
+    <SolidColorBrush x:Key="StatusWarningSubtleBrush" Color="#F8EFDF" />
+    <!-- StatusWarningStrong: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="StatusWarningStrongColor">#8A5A12</Color>
+    <SolidColorBrush x:Key="StatusWarningStrongBrush" Color="#8A5A12" />
+    <!-- StatusErrorSubtle: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="StatusErrorSubtleColor">#F4E4DF</Color>
+    <SolidColorBrush x:Key="StatusErrorSubtleBrush" Color="#F4E4DF" />
+    <!-- StatusErrorStrong: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="StatusErrorStrongColor">#A83A30</Color>
+    <SolidColorBrush x:Key="StatusErrorStrongBrush" Color="#A83A30" />
+    <!-- StatusInfoSubtle: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="StatusInfoSubtleColor">#E6EAEE</Color>
+    <SolidColorBrush x:Key="StatusInfoSubtleBrush" Color="#E6EAEE" />
+    <!-- StatusInfoStrong: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="StatusInfoStrongColor">#3A689E</Color>
+    <SolidColorBrush x:Key="StatusInfoStrongBrush" Color="#3A689E" />
+    <!-- DisabledBg: state-disabled -->
+    <Color x:Key="DisabledBgColor">#E8E1D5</Color>
+    <SolidColorBrush x:Key="DisabledBgBrush" Color="#E8E1D5" />
+    <!-- DisabledFg: state-disabled-text -->
+    <Color x:Key="DisabledFgColor">#8A8580</Color>
+    <SolidColorBrush x:Key="DisabledFgBrush" Color="#8A8580" />
+    <!-- DisabledBorder: state-disabled-border -->
+    <Color x:Key="DisabledBorderColor">#B0ABA5</Color>
+    <SolidColorBrush x:Key="DisabledBorderBrush" Color="#B0ABA5" />
+    <!-- InputBg: bg-surface -->
+    <Color x:Key="InputBgColor">#FBF9F5</Color>
+    <SolidColorBrush x:Key="InputBgBrush" Color="#FBF9F5" />
+    <!-- InputBgHover: bg-surface, PROPOSED (Gate 1A) -->
+    <Color x:Key="InputBgHoverColor">#FBF9F5</Color>
+    <SolidColorBrush x:Key="InputBgHoverBrush" Color="#FBF9F5" />
+    <!-- InputBgFocus: bg-surface, PROPOSED (Gate 1A) -->
+    <Color x:Key="InputBgFocusColor">#FBF9F5</Color>
+    <SolidColorBrush x:Key="InputBgFocusBrush" Color="#FBF9F5" />
+    <!-- ButtonSecondaryBg: bg-surface -->
+    <Color x:Key="ButtonSecondaryBgColor">#FBF9F5</Color>
+    <SolidColorBrush x:Key="ButtonSecondaryBgBrush" Color="#FBF9F5" />
+    <!-- ButtonSecondaryBorder: color-border -->
+    <Color x:Key="ButtonSecondaryBorderColor">#2A2725</Color>
+    <SolidColorBrush x:Key="ButtonSecondaryBorderBrush" Color="#2A2725" />
+    <!-- ButtonSecondaryBgHover: state-secondary-hover -->
+    <Color x:Key="ButtonSecondaryBgHoverColor">#E8E1D5</Color>
+    <SolidColorBrush x:Key="ButtonSecondaryBgHoverBrush" Color="#E8E1D5" />
+    <!-- ButtonSecondaryBgPressed: state-secondary-pressed -->
+    <Color x:Key="ButtonSecondaryBgPressedColor">#D5D1CB</Color>
+    <SolidColorBrush x:Key="ButtonSecondaryBgPressedBrush" Color="#D5D1CB" />
+    <!-- ButtonDisabledBorder: state-disabled-border -->
+    <Color x:Key="ButtonDisabledBorderColor">#B0ABA5</Color>
+    <SolidColorBrush x:Key="ButtonDisabledBorderBrush" Color="#B0ABA5" />
+    <!-- ButtonTextHover: text-primary, PROPOSED (Gate 1A) -->
+    <Color x:Key="ButtonTextHoverColor">#2A2725</Color>
+    <SolidColorBrush x:Key="ButtonTextHoverBrush" Color="#2A2725" />
+    <!-- ButtonTextPressed: text-primary, PROPOSED (Gate 1A) -->
+    <Color x:Key="ButtonTextPressedColor">#2A2725</Color>
+    <SolidColorBrush x:Key="ButtonTextPressedBrush" Color="#2A2725" />
+    <!-- ButtonTextUnderline: color-mar-caribe, PROPOSED (Gate 1A) -->
+    <Color x:Key="ButtonTextUnderlineColor">#2A8B9C</Color>
+    <SolidColorBrush x:Key="ButtonTextUnderlineBrush" Color="#2A8B9C" />
+    <!-- TableHeaderBg: table-head -->
+    <Color x:Key="TableHeaderBgColor">#2A2725</Color>
+    <SolidColorBrush x:Key="TableHeaderBgBrush" Color="#2A2725" />
+    <!-- TableHeaderFg: table-head-text -->
+    <Color x:Key="TableHeaderFgColor">#F2EDE6</Color>
+    <SolidColorBrush x:Key="TableHeaderFgBrush" Color="#F2EDE6" />
+    <!-- TableRowBg: bg-surface -->
+    <Color x:Key="TableRowBgColor">#FBF9F5</Color>
+    <SolidColorBrush x:Key="TableRowBgBrush" Color="#FBF9F5" />
+    <!-- TableRowAlt: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="TableRowAltColor">#F6F3EE</Color>
+    <SolidColorBrush x:Key="TableRowAltBrush" Color="#F6F3EE" />
+    <!-- TableRowHover: row-hover -->
+    <Color x:Key="TableRowHoverColor">#E8E1D5</Color>
+    <SolidColorBrush x:Key="TableRowHoverBrush" Color="#E8E1D5" />
+    <!-- TableRowSelected: row-selected -->
+    <Color x:Key="TableRowSelectedColor">#1F6E7B</Color>
+    <SolidColorBrush x:Key="TableRowSelectedBrush" Color="#1F6E7B" />
+    <!-- TableRowSelectedFg: row-selected-text -->
+    <Color x:Key="TableRowSelectedFgColor">#F2EDE6</Color>
+    <SolidColorBrush x:Key="TableRowSelectedFgBrush" Color="#F2EDE6" />
+    <!-- TableRule: table-rule -->
+    <Color x:Key="TableRuleColor">#D5D1CB</Color>
+    <SolidColorBrush x:Key="TableRuleBrush" Color="#D5D1CB" />
+    <!-- TableCellChanged: seq-mar-1, PROPOSED (Gate 1A) -->
+    <Color x:Key="TableCellChangedColor">#C3DDE2</Color>
+    <SolidColorBrush x:Key="TableCellChangedBrush" Color="#C3DDE2" />
+    <!-- TableSubtotalBg: literal, PROPOSED (Gate 1A) -->
+    <Color x:Key="TableSubtotalBgColor">#EDE7DE</Color>
+    <SolidColorBrush x:Key="TableSubtotalBgBrush" Color="#EDE7DE" />
+    <!-- TableSubtotalRule: seq-neutro-2, PROPOSED (Gate 1A) -->
+    <Color x:Key="TableSubtotalRuleColor">#B0ABA5</Color>
+    <SolidColorBrush x:Key="TableSubtotalRuleBrush" Color="#B0ABA5" />
+    <!-- TableTotalBg: seq-neutro-1, PROPOSED (Gate 1A) -->
+    <Color x:Key="TableTotalBgColor">#D5D1CB</Color>
+    <SolidColorBrush x:Key="TableTotalBgBrush" Color="#D5D1CB" />
+    <!-- TableTotalRule: color-carbon, PROPOSED (Gate 1A) -->
+    <Color x:Key="TableTotalRuleColor">#2A2725</Color>
+    <SolidColorBrush x:Key="TableTotalRuleBrush" Color="#2A2725" />
+    <!-- ChartSeries1: cat-1 -->
+    <Color x:Key="ChartSeries1Color">#2A8B9C</Color>
+    <SolidColorBrush x:Key="ChartSeries1Brush" Color="#2A8B9C" />
+    <!-- ChartSeries2: cat-2 -->
+    <Color x:Key="ChartSeries2Color">#E0735C</Color>
+    <SolidColorBrush x:Key="ChartSeries2Brush" Color="#E0735C" />
+    <!-- ChartSeries3: cat-3 -->
+    <Color x:Key="ChartSeries3Color">#4A7DB8</Color>
+    <SolidColorBrush x:Key="ChartSeries3Brush" Color="#4A7DB8" />
+    <!-- ChartSeries4: cat-4 -->
+    <Color x:Key="ChartSeries4Color">#E5B056</Color>
+    <SolidColorBrush x:Key="ChartSeries4Brush" Color="#E5B056" />
+    <!-- ChartSeries5: cat-5 -->
+    <Color x:Key="ChartSeries5Color">#8A8580</Color>
+    <SolidColorBrush x:Key="ChartSeries5Brush" Color="#8A8580" />
+    <!-- ChartGrid: chrome-grid, PROPOSED (Gate 1A) -->
+    <Color x:Key="ChartGridColor">#D5D1CB</Color>
+    <SolidColorBrush x:Key="ChartGridBrush" Color="#D5D1CB" />
+    <!-- ChartAxis: chrome-axis -->
+    <Color x:Key="ChartAxisColor">#2A2725</Color>
+    <SolidColorBrush x:Key="ChartAxisBrush" Color="#2A2725" />
+    <!-- ChartLabel: chrome-muted -->
+    <Color x:Key="ChartLabelColor">#8A8580</Color>
+    <SolidColorBrush x:Key="ChartLabelBrush" Color="#8A8580" />
+    <!-- ChartText: chrome-text -->
+    <Color x:Key="ChartTextColor">#2A2725</Color>
+    <SolidColorBrush x:Key="ChartTextBrush" Color="#2A2725" />
+    <!-- ChartSurface: bg-surface -->
+    <Color x:Key="ChartSurfaceColor">#FBF9F5</Color>
+    <SolidColorBrush x:Key="ChartSurfaceBrush" Color="#FBF9F5" />
+    <!-- ChartTooltipBg: bg-surface -->
+    <Color x:Key="ChartTooltipBgColor">#FBF9F5</Color>
+    <SolidColorBrush x:Key="ChartTooltipBgBrush" Color="#FBF9F5" />
+    <!-- ChartTooltipFg: text-primary -->
+    <Color x:Key="ChartTooltipFgColor">#2A2725</Color>
+    <SolidColorBrush x:Key="ChartTooltipFgBrush" Color="#2A2725" />
+    <!-- ChartCrosshair: color-mar-caribe -->
+    <Color x:Key="ChartCrosshairColor">#2A8B9C</Color>
+    <SolidColorBrush x:Key="ChartCrosshairBrush" Color="#2A8B9C" />
+    <!-- ChartFocus: hl-focus -->
+    <Color x:Key="ChartFocusColor">#D65A9C</Color>
+    <SolidColorBrush x:Key="ChartFocusBrush" Color="#D65A9C" />
+    <!-- ChartMuted: hl-muted -->
+    <Color x:Key="ChartMutedColor">#8A8580</Color>
+    <SolidColorBrush x:Key="ChartMutedBrush" Color="#8A8580" />
+    <!-- ChartDivergingLow: div-0, PROPOSED (Gate 1A) -->
+    <Color x:Key="ChartDivergingLowColor">#E0735C</Color>
+    <SolidColorBrush x:Key="ChartDivergingLowBrush" Color="#E0735C" />
+    <!-- ChartDivergingMid: div-2, PROPOSED (Gate 1A) -->
+    <Color x:Key="ChartDivergingMidColor">#F2EDE6</Color>
+    <SolidColorBrush x:Key="ChartDivergingMidBrush" Color="#F2EDE6" />
+    <!-- ChartDivergingHigh: div-4, PROPOSED (Gate 1A) -->
+    <Color x:Key="ChartDivergingHighColor">#4A7DB8</Color>
+    <SolidColorBrush x:Key="ChartDivergingHighBrush" Color="#4A7DB8" />
 
-    <Color x:Key="ColorSurfaceSubtle">#FBF9F5</Color>    <!-- bg-surface -->
-    <SolidColorBrush x:Key="SurfaceSubtle" Color="{StaticResource ColorSurfaceSubtle}" />
-
-    <Color x:Key="ColorTextPrimary">#2A2725</Color>      <!-- text-primary (Carbón) -->
-    <SolidColorBrush x:Key="TextPrimary" Color="{StaticResource ColorTextPrimary}" />
-
-    <Color x:Key="ColorTextSecondary">#8A8580</Color>    <!-- text-secondary (Tierra) -->
-    <SolidColorBrush x:Key="TextSecondary" Color="{StaticResource ColorTextSecondary}" />
-
-    <Color x:Key="ColorBorderControl">#2A2725</Color>    <!-- color-border -->
-    <SolidColorBrush x:Key="BorderControl" Color="{StaticResource ColorBorderControl}" />
-
-    <Color x:Key="ColorUiDefault">#2A2725</Color>        <!-- primary button fill -->
-    <SolidColorBrush x:Key="UiDefault" Color="{StaticResource ColorUiDefault}" />
-
-    <Color x:Key="ColorUiOn">#F2EDE6</Color>             <!-- text on primary fill -->
-    <SolidColorBrush x:Key="UiOn" Color="{StaticResource ColorUiOn}" />
-
-    <Color x:Key="ColorFocusRing">#2A8B9C</Color>        <!-- focus-ring (Mar Caribe) -->
-    <SolidColorBrush x:Key="FocusRing" Color="{StaticResource ColorFocusRing}" />
+    <!-- AAJ-only colours, used by Skins/AAJ/Controls.xaml only -->
+    <!-- AajShadow: shadow-color -->
+    <Color x:Key="AajShadowColor">#57534F</Color>
+    <SolidColorBrush x:Key="AajShadowBrush" Color="#57534F" />
+    <!-- AajScrollThumb: seq-neutro-2, PROPOSED (Gate 1A) -->
+    <Color x:Key="AajScrollThumbColor">#B0ABA5</Color>
+    <SolidColorBrush x:Key="AajScrollThumbBrush" Color="#B0ABA5" />
+    <!-- AajScrollThumbHover: color-tierra, PROPOSED (Gate 1A) -->
+    <Color x:Key="AajScrollThumbHoverColor">#8A8580</Color>
+    <SolidColorBrush x:Key="AajScrollThumbHoverBrush" Color="#8A8580" />
 </ResourceDictionary>

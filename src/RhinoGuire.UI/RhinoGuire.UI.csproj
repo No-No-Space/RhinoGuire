@@ -3,6 +3,8 @@
   <PropertyGroup>
     <TargetFramework>net7.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- No RhinoCommon here: the UI library stays loadable outside Rhino (unit tests, headless
+         snapshots). Rhino-specific hooks (dark mode, plug-in folder) are passed in by RhinoGuire.Plugin. -->
   </PropertyGroup>
 
   <ItemGroup>
@@ -11,12 +13,24 @@
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
-    <PackageReference Include="RhinoCommon" Version="$(RhinoCommonVersion)" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RhinoGuire.UI.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <Resource Include="Skins\AAJ\Fonts\*.ttf" />
     <Resource Include="Skins\AAJ\Fonts\*.otf" />
+    <!-- Sources of the generated files: kept beside them, not shipped. -->
+    <None Remove="Skins\AAJ\tokens.json;Skins\AAJ\skin-map.json" />
+    <None Include="Skins\AAJ\tokens.json;Skins\AAJ\skin-map.json;Icons\lucide\**" />
+  </ItemGroup>
+
+  <!-- The gallery is a Debug-only tool (RGGallery). -->
+  <ItemGroup Condition="'$(Configuration)' != 'Debug'">
+    <Page Remove="Gallery\**" />
+    <Compile Remove="Gallery\**" />
   </ItemGroup>
 
 </Project>
