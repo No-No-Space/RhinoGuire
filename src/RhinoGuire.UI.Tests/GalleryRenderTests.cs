@@ -1,3 +1,4 @@
+#if DEBUG // the gallery is compiled into Debug builds only
 using RhinoGuire.UI.Gallery;
 
 namespace RhinoGuire.UI.Tests;
@@ -22,3 +23,4 @@ public class GalleryRenderTests
         Assert.All(files, f => Assert.True(new FileInfo(f).Length > 10_000, $"{f} looks empty"));
     }
 }
+#endif
