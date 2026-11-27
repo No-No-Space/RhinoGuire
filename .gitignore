@@ -208,3 +208,6 @@ bin/
 obj/
 *.rhp
 *.yak
+
+# Agent worktrees (temporary copies of the repo)
+.claude/worktrees/

@@ -7,8 +7,8 @@ Tracking document for the RhinoGuire C# / WPF port. Updated at the start and end
 | WP | Description | Owner | State | Branch | Open questions / Notes |
 | --- | --- | --- | --- | --- | --- |
 | **WP-0** | Bootstrap and spikes | Antigravity, finished by Claude | Done | `feat/csharp-plugin` | Gate 0 passed. Results, decisions and dev loop in `SPIKE.md` |
-| **WP-1A** | Skin contract, shared controls, AAJ skin | — | Ready | — | Read `SPIKE.md` findings: every control needs a template; snapshots at a fixed scale |
-| **WP-1B** | Core logic and tests | — | Ready | — | |
+| **WP-1A** | Skin contract, shared controls, AAJ skin | Claude (started by a background agent) | In review: PR #9 | `wp-1a-skin` | Waiting on Gate 1A (`docs/port/gate-1a/README.md`). `SlopeInput` follows once WP-1B is merged |
+| **WP-1B** | Core logic and tests | Claude (started by a background agent) | In review: PR #8 | `wp-1b-core` | 900 tests; golden data regenerated from the Python tools |
 | **WP-1C** | Plugin shell, services, parity harness | — | Ready | — | Give panels a sensible size on first open (Gate 0 note, `SPIKE.md`) |
 | **WP-1D** | White skin | — | Pending | — | Blocked by Gate 1A |
 | **WP-2A** | Baquiano (pilot) | — | Pending | — | Blocked by Gate 1A, 1B, 1C |
@@ -30,7 +30,7 @@ Tracking document for the RhinoGuire C# / WPF port. Updated at the start and end
 ## Gates
 
 - **Gate 0:** Passed 2026-11-25. Manual checks all succeeded; `net7.0-windows`, RhinoCommon floor 8.21 and on-demand loading accepted. Note: panels open small (follow-up in WP-1C and the tool WPs)
-- **Gate 1A:** Pending (AAJ gallery, proposed tokens, density)
+- **Gate 1A:** Ready for review: PR #9, `docs/port/gate-1a/README.md` (density, primary-button shadow, 31 proposed tokens)
 - **Gate 1D:** Pending (White gallery)
 - **Gate 2:** Pending (Tool smoke checklists on live models)
 - **Gate 3:** Pending (Finished features & naming)
