@@ -65,13 +65,13 @@
     <CornerRadius x:Key="Radius">0</CornerRadius>
     <!-- ControlHeight: literal; bundle.css .aaj-btn / .aaj-field__input min-height -->
     <sys:Double x:Key="ControlHeight">40</sys:Double>
-    <!-- ControlHeightSmall: literal; AAJ has no small control; proposed for secondary actions in dense panels.; PROPOSED (Gate 1A) -->
+    <!-- ControlHeightSmall: literal; AAJ has no small control; proposed for secondary actions in dense panels.; RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <sys:Double x:Key="ControlHeightSmall">32</sys:Double>
     <!-- TableRowHeight: literal; bundle.css td: 9px padding + 12px x 1.4 line + 1px rule, rounded -->
     <sys:Double x:Key="TableRowHeight">36</sys:Double>
     <!-- TableHeaderHeight: literal; bundle.css th: 10px padding + 11px x 1.3 line -->
     <sys:Double x:Key="TableHeaderHeight">34</sys:Double>
-    <!-- TableIndent: literal; Indent per tree level in TreeDataGrid.; PROPOSED (Gate 1A) -->
+    <!-- TableIndent: literal; Indent per tree level in TreeDataGrid.; RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <sys:Double x:Key="TableIndent">16</sys:Double>
     <!-- IconSize: literal -->
     <sys:Double x:Key="IconSize">16</sys:Double>
@@ -97,7 +97,7 @@
     <!-- AAJ-only metrics, used by Skins/AAJ/Controls.xaml only -->
     <!-- AajFontSizeButton: literal -->
     <sys:Double x:Key="AajFontSizeButton">14</sys:Double>
-    <!-- AajFontSizeButtonSmall: literal; PROPOSED (Gate 1A) -->
+    <!-- AajFontSizeButtonSmall: literal; RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <sys:Double x:Key="AajFontSizeButtonSmall">13</sys:Double>
     <!-- AajFontSizeTab: literal -->
     <sys:Double x:Key="AajFontSizeTab">13</sys:Double>
@@ -107,7 +107,7 @@
     <FontWeight x:Key="AajFontWeightTableHeader">Bold</FontWeight>
     <!-- AajButtonPadding: literal -->
     <Thickness x:Key="AajButtonPadding">18,9</Thickness>
-    <!-- AajButtonPaddingSmall: literal; PROPOSED (Gate 1A) -->
+    <!-- AajButtonPaddingSmall: literal; RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Thickness x:Key="AajButtonPaddingSmall">12,5</Thickness>
     <!-- AajFieldPadding: literal -->
     <Thickness x:Key="AajFieldPadding">12,9</Thickness>

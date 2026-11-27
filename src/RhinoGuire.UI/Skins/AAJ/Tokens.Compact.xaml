@@ -11,7 +11,7 @@
     <!-- Overrides for Compact -->
     <!-- ControlHeight: literal; bundle.css .aaj-btn / .aaj-field__input min-height -->
     <sys:Double x:Key="ControlHeight">32</sys:Double>
-    <!-- ControlHeightSmall: literal; AAJ has no small control; proposed for secondary actions in dense panels.; PROPOSED (Gate 1A) -->
+    <!-- ControlHeightSmall: literal; AAJ has no small control; proposed for secondary actions in dense panels.; RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <sys:Double x:Key="ControlHeightSmall">26</sys:Double>
     <!-- TableRowHeight: literal; bundle.css td: 9px padding + 12px x 1.4 line + 1px rule, rounded -->
     <sys:Double x:Key="TableRowHeight">28</sys:Double>
@@ -19,7 +19,7 @@
     <sys:Double x:Key="TableHeaderHeight">28</sys:Double>
     <!-- AajButtonPadding: literal -->
     <Thickness x:Key="AajButtonPadding">14,5</Thickness>
-    <!-- AajButtonPaddingSmall: literal; PROPOSED (Gate 1A) -->
+    <!-- AajButtonPaddingSmall: literal; RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Thickness x:Key="AajButtonPaddingSmall">10,3</Thickness>
     <!-- AajFieldPadding: literal -->
     <Thickness x:Key="AajFieldPadding">10,5</Thickness>

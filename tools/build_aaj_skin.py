@@ -176,7 +176,7 @@ def color_lines(tokens, section, theme, title):
         spec = entry[theme]
         value = resolve_color(tokens, spec)
         source = "literal" if spec.startswith("#") else spec
-        flag = ", PROPOSED (Gate 1A)" if entry.get("proposed") else ""
+        flag = ", RhinoGuire value (not in AAJ), approved at Gate 1A" if entry.get("proposed") else ""
         lines.append(f"    <!-- {key}: {source}{flag} -->")
         lines.append(f'    <Color x:Key="{key}Color">{value}</Color>')
         lines.append(f'    <SolidColorBrush x:Key="{key}Brush" Color="{value}" />')
@@ -199,7 +199,7 @@ def shared_lines(tokens, section, title, overrides=None):
         source = entry.get("token", "literal")
         notes = [source] + ([entry["note"]] if entry.get("note") else [])
         if entry.get("proposed"):
-            notes.append("PROPOSED (Gate 1A)")
+            notes.append("RhinoGuire value (not in AAJ), approved at Gate 1A")
         lines.append(f"    <!-- {key}: {xml_comment('; '.join(notes))} -->")
         lines.append(f'    <{tag} x:Key="{key}">{value}</{tag}>')
     return lines

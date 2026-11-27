@@ -57,7 +57,7 @@
     <!-- ActivityDefault: color-mar-caribe -->
     <Color x:Key="ActivityDefaultColor">#2A8B9C</Color>
     <SolidColorBrush x:Key="ActivityDefaultBrush" Color="#2A8B9C" />
-    <!-- ActivitySubtle: seq-mar-1, PROPOSED (Gate 1A) -->
+    <!-- ActivitySubtle: seq-mar-1, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="ActivitySubtleColor">#C3DDE2</Color>
     <SolidColorBrush x:Key="ActivitySubtleBrush" Color="#C3DDE2" />
     <!-- ActivityStrong: color-mar-caribe-deep -->
@@ -66,7 +66,7 @@
     <!-- SelectionDefault: row-selected -->
     <Color x:Key="SelectionDefaultColor">#1F6E7B</Color>
     <SolidColorBrush x:Key="SelectionDefaultBrush" Color="#1F6E7B" />
-    <!-- SelectionSubtle: seq-mar-1, PROPOSED (Gate 1A) -->
+    <!-- SelectionSubtle: seq-mar-1, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="SelectionSubtleColor">#C3DDE2</Color>
     <SolidColorBrush x:Key="SelectionSubtleBrush" Color="#C3DDE2" />
     <!-- SelectionStrong: color-mar-caribe-deep -->
@@ -75,28 +75,28 @@
     <!-- SelectionOn: row-selected-text -->
     <Color x:Key="SelectionOnColor">#F2EDE6</Color>
     <SolidColorBrush x:Key="SelectionOnBrush" Color="#F2EDE6" />
-    <!-- StatusSuccessSubtle: literal, PROPOSED (Gate 1A) -->
+    <!-- StatusSuccessSubtle: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="StatusSuccessSubtleColor">#E8EFE6</Color>
     <SolidColorBrush x:Key="StatusSuccessSubtleBrush" Color="#E8EFE6" />
-    <!-- StatusSuccessStrong: literal, PROPOSED (Gate 1A) -->
+    <!-- StatusSuccessStrong: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="StatusSuccessStrongColor">#2F6E4A</Color>
     <SolidColorBrush x:Key="StatusSuccessStrongBrush" Color="#2F6E4A" />
-    <!-- StatusWarningSubtle: literal, PROPOSED (Gate 1A) -->
+    <!-- StatusWarningSubtle: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="StatusWarningSubtleColor">#F8EFDF</Color>
     <SolidColorBrush x:Key="StatusWarningSubtleBrush" Color="#F8EFDF" />
-    <!-- StatusWarningStrong: literal, PROPOSED (Gate 1A) -->
+    <!-- StatusWarningStrong: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="StatusWarningStrongColor">#8A5A12</Color>
     <SolidColorBrush x:Key="StatusWarningStrongBrush" Color="#8A5A12" />
-    <!-- StatusErrorSubtle: literal, PROPOSED (Gate 1A) -->
+    <!-- StatusErrorSubtle: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="StatusErrorSubtleColor">#F4E4DF</Color>
     <SolidColorBrush x:Key="StatusErrorSubtleBrush" Color="#F4E4DF" />
-    <!-- StatusErrorStrong: literal, PROPOSED (Gate 1A) -->
+    <!-- StatusErrorStrong: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="StatusErrorStrongColor">#A83A30</Color>
     <SolidColorBrush x:Key="StatusErrorStrongBrush" Color="#A83A30" />
-    <!-- StatusInfoSubtle: literal, PROPOSED (Gate 1A) -->
+    <!-- StatusInfoSubtle: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="StatusInfoSubtleColor">#E6EAEE</Color>
     <SolidColorBrush x:Key="StatusInfoSubtleBrush" Color="#E6EAEE" />
-    <!-- StatusInfoStrong: literal, PROPOSED (Gate 1A) -->
+    <!-- StatusInfoStrong: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="StatusInfoStrongColor">#3A689E</Color>
     <SolidColorBrush x:Key="StatusInfoStrongBrush" Color="#3A689E" />
     <!-- DisabledBg: state-disabled -->
@@ -111,10 +111,10 @@
     <!-- InputBg: bg-surface -->
     <Color x:Key="InputBgColor">#FBF9F5</Color>
     <SolidColorBrush x:Key="InputBgBrush" Color="#FBF9F5" />
-    <!-- InputBgHover: bg-surface, PROPOSED (Gate 1A) -->
+    <!-- InputBgHover: bg-surface, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="InputBgHoverColor">#FBF9F5</Color>
     <SolidColorBrush x:Key="InputBgHoverBrush" Color="#FBF9F5" />
-    <!-- InputBgFocus: bg-surface, PROPOSED (Gate 1A) -->
+    <!-- InputBgFocus: bg-surface, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="InputBgFocusColor">#FBF9F5</Color>
     <SolidColorBrush x:Key="InputBgFocusBrush" Color="#FBF9F5" />
     <!-- ButtonSecondaryBg: bg-surface -->
@@ -132,13 +132,13 @@
     <!-- ButtonDisabledBorder: state-disabled-border -->
     <Color x:Key="ButtonDisabledBorderColor">#B0ABA5</Color>
     <SolidColorBrush x:Key="ButtonDisabledBorderBrush" Color="#B0ABA5" />
-    <!-- ButtonTextHover: text-primary, PROPOSED (Gate 1A) -->
+    <!-- ButtonTextHover: text-primary, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="ButtonTextHoverColor">#2A2725</Color>
     <SolidColorBrush x:Key="ButtonTextHoverBrush" Color="#2A2725" />
-    <!-- ButtonTextPressed: text-primary, PROPOSED (Gate 1A) -->
+    <!-- ButtonTextPressed: text-primary, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="ButtonTextPressedColor">#2A2725</Color>
     <SolidColorBrush x:Key="ButtonTextPressedBrush" Color="#2A2725" />
-    <!-- ButtonTextUnderline: color-mar-caribe, PROPOSED (Gate 1A) -->
+    <!-- ButtonTextUnderline: color-mar-caribe, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="ButtonTextUnderlineColor">#2A8B9C</Color>
     <SolidColorBrush x:Key="ButtonTextUnderlineBrush" Color="#2A8B9C" />
     <!-- TableHeaderBg: table-head -->
@@ -150,7 +150,7 @@
     <!-- TableRowBg: bg-surface -->
     <Color x:Key="TableRowBgColor">#FBF9F5</Color>
     <SolidColorBrush x:Key="TableRowBgBrush" Color="#FBF9F5" />
-    <!-- TableRowAlt: literal, PROPOSED (Gate 1A) -->
+    <!-- TableRowAlt: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="TableRowAltColor">#F6F3EE</Color>
     <SolidColorBrush x:Key="TableRowAltBrush" Color="#F6F3EE" />
     <!-- TableRowHover: row-hover -->
@@ -165,19 +165,19 @@
     <!-- TableRule: table-rule -->
     <Color x:Key="TableRuleColor">#D5D1CB</Color>
     <SolidColorBrush x:Key="TableRuleBrush" Color="#D5D1CB" />
-    <!-- TableCellChanged: seq-mar-1, PROPOSED (Gate 1A) -->
+    <!-- TableCellChanged: seq-mar-1, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="TableCellChangedColor">#C3DDE2</Color>
     <SolidColorBrush x:Key="TableCellChangedBrush" Color="#C3DDE2" />
-    <!-- TableSubtotalBg: literal, PROPOSED (Gate 1A) -->
+    <!-- TableSubtotalBg: literal, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="TableSubtotalBgColor">#EDE7DE</Color>
     <SolidColorBrush x:Key="TableSubtotalBgBrush" Color="#EDE7DE" />
-    <!-- TableSubtotalRule: seq-neutro-2, PROPOSED (Gate 1A) -->
+    <!-- TableSubtotalRule: seq-neutro-2, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="TableSubtotalRuleColor">#B0ABA5</Color>
     <SolidColorBrush x:Key="TableSubtotalRuleBrush" Color="#B0ABA5" />
-    <!-- TableTotalBg: seq-neutro-1, PROPOSED (Gate 1A) -->
+    <!-- TableTotalBg: seq-neutro-1, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="TableTotalBgColor">#D5D1CB</Color>
     <SolidColorBrush x:Key="TableTotalBgBrush" Color="#D5D1CB" />
-    <!-- TableTotalRule: color-carbon, PROPOSED (Gate 1A) -->
+    <!-- TableTotalRule: color-carbon, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="TableTotalRuleColor">#2A2725</Color>
     <SolidColorBrush x:Key="TableTotalRuleBrush" Color="#2A2725" />
     <!-- ChartSeries1: cat-1 -->
@@ -195,7 +195,7 @@
     <!-- ChartSeries5: cat-5 -->
     <Color x:Key="ChartSeries5Color">#8A8580</Color>
     <SolidColorBrush x:Key="ChartSeries5Brush" Color="#8A8580" />
-    <!-- ChartGrid: chrome-grid, PROPOSED (Gate 1A) -->
+    <!-- ChartGrid: chrome-grid, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="ChartGridColor">#D5D1CB</Color>
     <SolidColorBrush x:Key="ChartGridBrush" Color="#D5D1CB" />
     <!-- ChartAxis: chrome-axis -->
@@ -225,13 +225,13 @@
     <!-- ChartMuted: hl-muted -->
     <Color x:Key="ChartMutedColor">#8A8580</Color>
     <SolidColorBrush x:Key="ChartMutedBrush" Color="#8A8580" />
-    <!-- ChartDivergingLow: div-0, PROPOSED (Gate 1A) -->
+    <!-- ChartDivergingLow: div-0, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="ChartDivergingLowColor">#E0735C</Color>
     <SolidColorBrush x:Key="ChartDivergingLowBrush" Color="#E0735C" />
-    <!-- ChartDivergingMid: div-2, PROPOSED (Gate 1A) -->
+    <!-- ChartDivergingMid: div-2, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="ChartDivergingMidColor">#F2EDE6</Color>
     <SolidColorBrush x:Key="ChartDivergingMidBrush" Color="#F2EDE6" />
-    <!-- ChartDivergingHigh: div-4, PROPOSED (Gate 1A) -->
+    <!-- ChartDivergingHigh: div-4, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="ChartDivergingHighColor">#4A7DB8</Color>
     <SolidColorBrush x:Key="ChartDivergingHighBrush" Color="#4A7DB8" />
 
@@ -239,10 +239,10 @@
     <!-- AajShadow: shadow-color -->
     <Color x:Key="AajShadowColor">#57534F</Color>
     <SolidColorBrush x:Key="AajShadowBrush" Color="#57534F" />
-    <!-- AajScrollThumb: seq-neutro-2, PROPOSED (Gate 1A) -->
+    <!-- AajScrollThumb: seq-neutro-2, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="AajScrollThumbColor">#B0ABA5</Color>
     <SolidColorBrush x:Key="AajScrollThumbBrush" Color="#B0ABA5" />
-    <!-- AajScrollThumbHover: color-tierra, PROPOSED (Gate 1A) -->
+    <!-- AajScrollThumbHover: color-tierra, RhinoGuire value (not in AAJ), approved at Gate 1A -->
     <Color x:Key="AajScrollThumbHoverColor">#8A8580</Color>
     <SolidColorBrush x:Key="AajScrollThumbHoverBrush" Color="#8A8580" />
 </ResourceDictionary>

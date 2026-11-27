@@ -1,5 +1,7 @@
 # Gate 1A: AAJ skin review
 
+> **Passed on 2026-11-27.** Aksel accepted the three recommendations: **40 px controls** (AAJ's default; the small styles for secondary actions in dense panels), the **hard shadow on the primary button**, and **all 31 proposed tokens** as listed below. These are the skin's defaults; `Compact` and `NoShadow` stay available as optional variants. In `skin-map.json` the entries keep `"proposed": true`, which now means "RhinoGuire value, not in AAJ, approved at Gate 1A".
+
 Three decisions for Aksel before any tool panel is built. The images in this folder show the AAJ skin as it stands; they are rendered by `GalleryRenderTests` (or the `RGUiSnapshot` command in Rhino, which produces pixel-identical images) at 1.5× scale.
 
 | Image | Shows |
